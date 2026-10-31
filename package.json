@@ -1,0 +1,86 @@
+{
+  "name": "@dsh-cbw/bilibili",
+  "version": "2.3.1",
+  "description": "DSH Bilibili duty plugin — forked from dsh-bili-scroll with fixed-session, master profile, hobby analysis, interest learning",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "bilibili",
+    "mcp",
+    "duty"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Scorpioflz/dsh-cbw-bilibili.git"
+  },
+  "homepage": "https://github.com/Scorpioflz/dsh-cbw-bilibili#readme",
+  "bugs": {
+    "url": "https://github.com/Scorpioflz/dsh-cbw-bilibili/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "profile-template",
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib",
+    "prompts",
+    "vendor",
+    "README.md",
+    "README_ZH.md",
+    "AGENTS.md",
+    "selfcheck.mjs",
+    "LICENSE",
+    "NOTICE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md",
+    "CONTRIBUTORS.md"
+  ],
+  "engines": {
+    "dsh": ">=0.1.7-rc.1",
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
