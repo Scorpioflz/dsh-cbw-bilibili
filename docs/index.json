@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "title": { "en": "DSH-CBW Plugin Index", "zh": "DSH-CBW 插件索引" },
+  "plugins": [
+    {
+      "name": "@dsh-cbw/bilibili",
+      "title": { "en": "Bilibili Duty (CBW Fork)", "zh": "刷B站 (CBW 分支)" },
+      "description": {
+        "en": "DSH Bilibili duty plugin — fixed-session, master profile, hobby analysis, interest learning, watch stats, inbox classification",
+        "zh": "DSH B站值班插件 — 固定会话 + 主人画像 + 爱好分析 + 兴趣学习 + 观看统计 + 收件箱分类"
+      },
+      "author": "Scorpioflz",
+      "homepage": "https://github.com/Scorpioflz/dsh-cbw-bilibili",
+      "repository": "https://github.com/Scorpioflz/dsh-cbw-bilibili",
+      "keywords": ["dsh", "dsh-plugin", "bilibili", "mcp", "duty"],
+      "versions": [
+        {
+          "version": "2.3.1",
+          "publishTimestamp": 1793451051,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Scorpioflz/dsh-cbw-bilibili",
+            "commit": "dbdda77f5f5e557463903a440e522c5299614cb6"
+          },
+          "engines": { "dsh": ">=0.1.7-rc.1" }
+        }
+      ]
+    }
+  ]
+}
