@@ -295,6 +295,10 @@ function reportMeta() {
     fixedSession: true, dutySessionId: 'bili-duty-fixed', dmSessionId: 'bili-dm-fixed', webapiBase: '', webapiKey: '',
     // P1 爱好分析
     hobbyRefreshDays: 30, hobbyMaxVideos: 500, hobbyLastRefresh: 0,
+    // P2 兴趣学习+半衰期
+    interestLearnEnabled: true, interestHalfLifeDays: 14,
+    // P2 评论三层闸门
+    commentHardGate: true,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -359,6 +363,11 @@ function reportMeta() {
     if ('hobbyRefreshDays' in p) p.hobbyRefreshDays = Math.max(1, Math.min(Number(p.hobbyRefreshDays) || 30, 365))
     if ('hobbyMaxVideos' in p) p.hobbyMaxVideos = Math.max(10, Math.min(Number(p.hobbyMaxVideos) || 500, 5000))
     if ('hobbyLastRefresh' in p) p.hobbyLastRefresh = Math.max(0, Number(p.hobbyLastRefresh) || 0)
+    // P2 兴趣学习
+    if ('interestLearnEnabled' in p) p.interestLearnEnabled = Boolean(p.interestLearnEnabled)
+    if ('interestHalfLifeDays' in p) p.interestHalfLifeDays = Math.max(1, Math.min(Number(p.interestHalfLifeDays) || 14, 90))
+    // P2 评论闸门
+    if ('commentHardGate' in p) p.commentHardGate = Boolean(p.commentHardGate)
     return p
   }
 
@@ -787,7 +796,31 @@ function reportMeta() {
   })
 
   tool({
-    name: 'bili_reply',
+    name: 'bili_storyboard',
+    description: '看视频的分镜画面（一次取 6 帧按时长均匀分布，比 bili_frames 看得更全）。\n'
+      + '借鉴 dsh-bili-eyes 的分镜思路：用一次工具调用拿到多个时刻的画面，理解视频的视觉流转。\n'
+      + '想盯某个时刻用 bili_frames(at=[...])；想一眼看全片节奏用这个。',
+    parameters: {
+      bvid: { type: 'string', description: 'BV号' },
+    },
+    output: imageOutput,
+    async execute(args, exec) {
+      const { json, images } = await callRaw('bili_frames', {
+        bvid: String(args.bvid ?? ''),
+        num: 6,
+      }, { signal: exec?.signal })
+      const meta = json && typeof json === 'object' ? json : { raw: json }
+      if (!meta.ok) return meta
+      if (!images.length) return { ...meta, ok: false, error: 'MCP 没返回图片' }
+
+      const a = await attachImages(exec, images)
+      return a.ok
+        ? { ...meta, storyboard: true, frames: images.length, image_attached: true, images: a.refs }
+        : { ...meta, storyboard: true, image_attached: false, image_skip_reason: a.reason, hint: a.hint }
+    },
+  })
+
+  tool({
     description: '在视频下发评论（或回复某条评论）。这就是"@ 本人"那一下：短、干净、纯文本 @ 写在正文里。\n'
       + '🔴 安全闸：设置页的「自动评论并 @ 你」**默认是关的**；关着的时候这个工具会拒绝 —— '
       + '除非本人当场让你发（那时传 force: true）。',
@@ -809,6 +842,18 @@ function reportMeta() {
           hint: cfg.dmMode === 'only'
             ? '现在是「只私信」模式（dmMode=only）—— 规定不发公开评论，改成用 bili_send_message 私信。确实要发时传 force: true。'
             : '要发评论得同时满足两条：设置里开着「自动评论并 @ 你」、并且填了「要 @ 谁」。或者本人当场让你发时传 force: true。',
+        }
+      }
+      // P2-C 评论三层硬禁区：政治/政府/前沿，force 也越不过
+      const gateHit = checkCommentHardGate(args.text)
+      if (gateHit) {
+        return {
+          ok: false,
+          blocked: true,
+          hardGate: true,
+          category: gateHit.category,
+          word: gateHit.word,
+          hint: `🔴 评论撞了硬禁区「${gateHit.category}」（命中词：${gateHit.word}）—— 这条无论如何都不发，force 也不行。换一条评论或干脆不发。`,
         }
       }
       return call('bili_reply', {
@@ -1167,6 +1212,92 @@ function reportMeta() {
       return doHobbyAnalyze(args.uid, args.nickname, args.injectMemory !== false)
     },
   })
+
+  /* ─────────────── P2-A 兴趣学习+半衰期 ───────────────
+   *  从值班轮挑中的视频标题里提取关键词，按半衰期淡忘，替代死配置 keywords
+   *  数据存 learned-interests.json: [{ word, score, lastUpdate }]
+   *  半衰期：score *= 0.5^(daysSince / halfLifeDays)
+   */
+  const learnedInterestsFile = join(stateDir, 'learned-interests.json')
+  const readLearnedInterests = () => {
+    try { return JSON.parse(readFileSync(learnedInterestsFile, 'utf8')) || [] } catch { return [] }
+  }
+  const writeLearnedInterests = (list) => {
+    try { writeFileSync(learnedInterestsFile, JSON.stringify(list, null, 2), 'utf8') } catch { /* 写不了就算了 */ }
+  }
+
+  /** 从今天的报告里提取挑中视频的标题，更新兴趣词分数 */
+  const updateLearnedInterests = () => {
+    if (!cfg.interestLearnEnabled) return
+    try {
+      const report = reportFileOf()
+      if (!existsSync(report)) return
+      const text = readFileSync(report, 'utf8')
+      // 提取 ### BV号 后面的标题行（报告格式：### BV号\n标题 ...）
+      const titles = []
+      for (const m of text.matchAll(/^#{2,3}\s+(BV[0-9A-Za-z]{10})/gm)) {
+        const after = text.slice(m.index + m[0].length, m.index + m[0].length + 200)
+        const titleLine = after.split('\n').find((l) => l.trim() && !l.trim().startsWith('#') && !l.trim().startsWith('http'))
+        if (titleLine) titles.push(titleLine.trim())
+      }
+      if (!titles.length) return
+
+      // 用 P1 的 extractTitleKeywords 提取关键词
+      const keywords = extractTitleKeywords(titles.map((t) => ({ title: t })), 30)
+      if (!keywords.length) return
+
+      const now = Date.now()
+      const halfLife = Math.max(1, Number(cfg.interestHalfLifeDays) || 14)
+      const list = readLearnedInterests()
+
+      // 先对所有已有词做半衰期衰减
+      for (const item of list) {
+        const daysSince = (now - Number(item.lastUpdate || 0)) / (24 * 60 * 60 * 1000)
+        if (daysSince > 0) item.score = Number(item.score || 0) * Math.pow(0.5, daysSince / halfLife)
+        item.lastUpdate = now
+      }
+
+      // 更新/新增本轮提取的词
+      for (const kw of keywords) {
+        const existing = list.find((it) => it.word === kw.word)
+        if (existing) existing.score = Number(existing.score || 0) + kw.count
+        else list.push({ word: kw.word, score: kw.count, lastUpdate: now })
+      }
+
+      // 清理低分词（score < 0.1）并按分数降序
+      const cleaned = list.filter((it) => Number(it.score || 0) >= 0.1).sort((a, b) => b.score - a.score).slice(0, 100)
+      writeLearnedInterests(cleaned)
+      log(`兴趣学习：更新 ${keywords.length} 个词，共 ${cleaned.length} 个活跃兴趣词`)
+    } catch (e) { log('兴趣学习出错（不影响运行）：' + String(e?.message ?? e)) }
+  }
+
+  /** 取 top N 兴趣词用于搜索 */
+  const getTopInterests = (n = 8) => {
+    if (!cfg.interestLearnEnabled) return []
+    const list = readLearnedInterests()
+    return list.filter((it) => Number(it.score || 0) >= 0.5).slice(0, n).map((it) => it.word)
+  }
+
+  /* ─────────────── P2-C 评论三层硬禁区 ───────────────
+   *  借鉴 bilihave/dsh-whale-panel：政治/政府/前沿科学硬禁区
+   *  撞上就拒绝，force: true 也越不过（跟 autoComment 闸门不同）
+   */
+  const COMMENT_HARD_GATES = {
+    politics: ['政治', '政府', '国家领导', '党', '两会', '人大', '政协', '主席', '总理', '总统', '选举', '维稳', '六四', '法轮功', '台独', '港独', '疆独', '藏独'],
+    government: ['官方', '政策', '法律', '法规', '执法', '公安', '法院', '检察院', '纪检', '监察', '信访', '城管', '维稳'],
+    frontier: ['量子计算', '基因编辑', '核武器', '生物武器', '化学武器', '人工智能觉醒', 'AGI', 'singularity', '脑机接口'],
+  }
+
+  const checkCommentHardGate = (text) => {
+    if (!cfg.commentHardGate) return null
+    const t = String(text || '')
+    for (const [category, words] of Object.entries(COMMENT_HARD_GATES)) {
+      for (const w of words) {
+        if (t.includes(w)) return { category, word: w }
+      }
+    }
+    return null
+  }
 
   /* ─────────────── 跑一轮（跟老方案同一条路：dsh --profile headless <prompt>） ─────────────── */
 
@@ -1568,12 +1699,22 @@ function reportMeta() {
               + `\n\n评论长度：${({ short: '短（≤15 字）', medium: '中（≤40 字，默认）', long: '长（≤100 字）' })[cfg.commentLength] || '中（≤40 字，默认）'} —— 超了要自己删到这条线内。`
       // ⭐ 2026-10-24：留空不再用内置关键词（那会让所有用户刷同一批视频、评论区扎堆）
       //    ⇒ 留空 = 用 `bili_recommend` 刷**这个账号的首页推荐流**，按各自画像天然散开 ✓
-      + (kws.length
-        ? `关键词用这些：${kws.join('、')}（用 bili_search 搜）。`
-        + `排序用 ${cfg.searchSort || 'pubdate'}（pubdate=最新 · click=播放 · dm=弹幕 · totalrank=综合）；`
-        + `翻页：${Math.max(1, Number(cfg.searchPages) || 2)} 页 —— 用 bili_search(page=1..N)，每页扫一眼标题再决定，别只看第一页；`
-        + `这一轮最多**细看** ${Math.max(1, Number(cfg.fetchPerRound) || 8)} 条（读字幕 / 评论都算一次请求），其余的只扫标题，别把候选全读一遍；`
-        : '没填关键词 ⇒ **这一轮用 bili_recommend 刷首页推荐流**（不要用 bili_search 搜固定词）。')
+      // ⭐ P2-A：留空时优先用学习兴趣词（半衰期淡忘），没有才退到推荐流
+      + (() => {
+        if (kws.length) {
+          return `关键词用这些：${kws.join('、')}（用 bili_search 搜）。`
+            + `排序用 ${cfg.searchSort || 'pubdate'}（pubdate=最新 · click=播放 · dm=弹幕 · totalrank=综合）；`
+            + `翻页：${Math.max(1, Number(cfg.searchPages) || 2)} 页 —— 用 bili_search(page=1..N)，每页扫一眼标题再决定，别只看第一页；`
+            + `这一轮最多**细看** ${Math.max(1, Number(cfg.fetchPerRound) || 8)} 条（读字幕 / 评论都算一次请求），其余的只扫标题，别把候选全读一遍；`
+        }
+        const learned = getTopInterests(8)
+        if (learned.length) {
+          return `⭐ 没手填关键词，但学到了兴趣词：${learned.join('、')}（用 bili_search 搜，每个词搜一页）。`
+            + `这些词从你以前挑中的视频标题里提取、按半衰期淡忘（${cfg.interestHalfLifeDays || 14} 天半衰期）。`
+            + `排序用 ${cfg.searchSort || 'pubdate'}；这一轮最多**细看** ${Math.max(1, Number(cfg.fetchPerRound) || 8)} 条。`
+        }
+        return '没填关键词、也没学到兴趣词 ⇒ **这一轮用 bili_recommend 刷首页推荐流**（不要用 bili_search 搜固定词）。'
+      })()
       + `本地转写：${cfg.transcribe
         ? (asrReadyNow()
           ? '开着，而且装好了（没字幕的视频用家里那份 asr.py 转，命令见章程）'
@@ -1653,7 +1794,7 @@ function reportMeta() {
    */
   const mcpWhitelist = () => {
     const list = ['bili_search', 'bili_subtitle', 'bili_comments', 'bili_video_info',
-      'bili_cover', 'bili_frames', 'bili_danmaku', 'bili_recommend']  // 看封面 / 画面帧 / 弹幕：只读，不需要额外的闸
+      'bili_cover', 'bili_frames', 'bili_storyboard', 'bili_danmaku', 'bili_recommend']  // 看封面 / 画面帧 / 分镜 / 弹幕：只读，不需要额外的闸
     // ⭐⭐ 2.0.5（issue #96 安全加固）：值班轮改成最小权限 profile（没有 fs / shell / web）⇒
     //    写日报 / 判重表 / 归档、以及无字幕转写，全走这几只**固定路径的窄口工具** ✓
     list.push('duty_paths', 'duty_report_append', 'duty_seen_append', 'duty_digest_append', 'duty_seen_recent')
@@ -2212,6 +2353,8 @@ function reportMeta() {
             }
           }
       } catch (e) { log(`数挑了几条时出错（不影响这一轮）：${e?.message ?? e}`) }
+      // P2-A 兴趣学习：从本轮报告里提取关键词更新兴趣画像
+      if (code === 0) { try { updateLearnedInterests() } catch (e) { log('兴趣学习出错：' + String(e?.message ?? e)) } }
       // ⭐ 发完评论之后**过一会儿再核一次**（2026-10-16 加的「评论发出后复核」）：
       //    接口回"发送成功"≠ 公开可见（新号/风控会进审核）；而"不公开"时连 @ 通知都不会推 ⇒
       //    插件会以为发了、下一轮不再发 ⇒ 一条都没到人。等 90 秒再查，避免把"还在审核"误判成"没发出去"。

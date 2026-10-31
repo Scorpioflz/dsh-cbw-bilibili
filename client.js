@@ -289,6 +289,10 @@ function WatchTab() {
       const [hobbyMaxVids, setHobbyMaxVids] = React.useState(null)  // P1 单次分析最多视频数
       const [hobbyBusy, setHobbyBusy] = React.useState(false)       // P1 分析中
       const [hobbyResult, setHobbyResult] = React.useState(null)    // P1 分析结果
+      // P2 兴趣学习 + 评论闸门
+      const [interestLearn, setInterestLearn] = React.useState(null)  // 兴趣学习开关
+      const [interestHalfLife, setInterestHalfLife] = React.useState(null)  // 半衰期天数
+      const [hardGate, setHardGate] = React.useState(null)  // 评论硬禁区开关
       const [mProv, setMProv] = React.useState(null)      // 手填模型的 provider（只在读不到模型列表时露出来）
       const [mName, setMName] = React.useState(null)      // 手填模型的 model id
       const [login, setLogin] = React.useState(null)
@@ -343,6 +347,10 @@ function WatchTab() {
         // P1 爱好分析
         if (cfg && hobbyRefresh === null) setHobbyRefresh(Number(cfg.hobbyRefreshDays) || 30)
         if (cfg && hobbyMaxVids === null) setHobbyMaxVids(Number(cfg.hobbyMaxVideos) || 500)
+        // P2 兴趣学习 + 评论闸门
+        if (cfg && interestLearn === null) setInterestLearn(cfg.interestLearnEnabled !== false)
+        if (cfg && interestHalfLife === null) setInterestHalfLife(Number(cfg.interestHalfLifeDays) || 14)
+        if (cfg && hardGate === null) setHardGate(cfg.commentHardGate !== false)
       }, [cfg])
 
       // ⭐ 收藏夹列表：只读一次，读不到就空列表（别每 5 秒重拉）
@@ -779,6 +787,13 @@ function WatchTab() {
             on: sw('autoComment'),
             onChange: (v) => patch({ autoComment: v }, '自动评论'),
           }) : null,
+          // P2-C 评论三层硬禁区
+          (dmMode === 'off' || dmMode === 'both') ? h(ToggleRow, {
+            label: '评论硬禁区（政治/政府/前沿）',
+            note: '开了以后评论撞政治/政府/前沿科学敏感词就硬拒，force 也越不过。借鉴 dsh-whale-panel 三层闸门。',
+            on: Boolean(hardGate),
+            onChange: (v) => { setHardGate(v); patch({ commentHardGate: v }, '评论硬禁区') },
+          }) : null,
           (dmMode === 'off' || dmMode === 'both') && sw('autoComment') ? h('div', { 'data-bd-sub': '' },
             h('div', { 'data-bd-row': '' },
               h('div', { 'data-bd-grow': '' },
@@ -1026,6 +1041,25 @@ function WatchTab() {
             hobbyResult.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
               '主要兴趣词：' + hobbyResult.hobbyProfile.primaryInterests.join('、')) : null,
           ) : null,
+
+          // P2-A 兴趣学习+半衰期
+          h(ToggleRow, {
+            label: '兴趣学习（自动提取关键词 + 半衰期淡忘）',
+            note: '开了以后从每轮挑中的视频标题里提取关键词，按半衰期淡忘，替代手填关键词。没手填关键词时优先用学到的兴趣词搜。',
+            on: Boolean(interestLearn),
+            onChange: (v) => { setInterestLearn(v); patch({ interestLearnEnabled: v }, '兴趣学习') },
+          }),
+          interestLearn ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '半衰期（天）'),
+                h('div', { 'data-bd-note': '' }, '兴趣词分数每过这么多天减半（1–90，默认 14）')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 90,
+                value: interestHalfLife ?? 14,
+                onChange: (e) => setInterestHalfLife(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(interestHalfLife) || 14, 90)); setInterestHalfLife(n); patch({ interestHalfLifeDays: n }, '兴趣半衰期') },
+              }))) : null,
 
         /* ── 环境与账号 ── */
         /* ── 它刷过的视频 ── */
