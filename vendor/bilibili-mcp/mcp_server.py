@@ -1282,7 +1282,7 @@ async def bili_watched_history(num: int = 100) -> str:
     cred = get_cred()
     try:
         await _throttle()
-        raw = await user.get_self_history_new(credential=cred, ps=min(num, 100), max=num)
+        raw = await user.get_self_history(page_num=1, per_page_item=min(num, 100), credential=cred)
         items = []
         if isinstance(raw, list):
             items = raw
