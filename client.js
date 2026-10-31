@@ -293,6 +293,11 @@ function WatchTab() {
       const [interestLearn, setInterestLearn] = React.useState(null)  // 兴趣学习开关
       const [interestHalfLife, setInterestHalfLife] = React.useState(null)  // 半衰期天数
       const [hardGate, setHardGate] = React.useState(null)  // 评论硬禁区开关
+      // P3 观看统计 + 收件箱分类
+      const [watchedStats, setWatchedStats] = React.useState(null)  // 观看统计开关
+      const [watchedStatsDays, setWatchedStatsDays] = React.useState(null)  // 统计回看天数
+      const [inboxScan, setInboxScan] = React.useState(null)  // 收件箱扫描开关
+      const [inboxPerRound, setInboxPerRound] = React.useState(null)  // 每轮处理条数
       const [mProv, setMProv] = React.useState(null)      // 手填模型的 provider（只在读不到模型列表时露出来）
       const [mName, setMName] = React.useState(null)      // 手填模型的 model id
       const [login, setLogin] = React.useState(null)
@@ -351,6 +356,11 @@ function WatchTab() {
         if (cfg && interestLearn === null) setInterestLearn(cfg.interestLearnEnabled !== false)
         if (cfg && interestHalfLife === null) setInterestHalfLife(Number(cfg.interestHalfLifeDays) || 14)
         if (cfg && hardGate === null) setHardGate(cfg.commentHardGate !== false)
+        // P3 观看统计 + 收件箱分类
+        if (cfg && watchedStats === null) setWatchedStats(cfg.watchedStatsEnabled !== false)
+        if (cfg && watchedStatsDays === null) setWatchedStatsDays(Number(cfg.watchedStatsDays) || 7)
+        if (cfg && inboxScan === null) setInboxScan(Boolean(cfg.inboxScanEnabled))
+        if (cfg && inboxPerRound === null) setInboxPerRound(Number(cfg.inboxScanPerRound) || 5)
       }, [cfg])
 
       // ⭐ 收藏夹列表：只读一次，读不到就空列表（别每 5 秒重拉）
@@ -1059,6 +1069,44 @@ function WatchTab() {
                 value: interestHalfLife ?? 14,
                 onChange: (e) => setInterestHalfLife(e.target.value),
                 onBlur: () => { const n = Math.max(1, Math.min(Number(interestHalfLife) || 14, 90)); setInterestHalfLife(n); patch({ interestHalfLifeDays: n }, '兴趣半衰期') },
+              }))) : null,
+
+          // P3-A 观看统计
+          h(ToggleRow, {
+            label: '观看统计（在日报里附加完成度/时间分布）',
+            note: '开了以后每轮从 B站观看历史算统计：看完/跳过/部分、按小时分布、深夜比例、常看 UP。借鉴 dsh-bili-statistics。',
+            on: Boolean(watchedStats),
+            onChange: (v) => { setWatchedStats(v); patch({ watchedStatsEnabled: v }, '观看统计') },
+          }),
+          watchedStats ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '回看天数'),
+                h('div', { 'data-bd-note': '' }, '统计最近几天的观看历史（1–30，默认 7）')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 30,
+                value: watchedStatsDays ?? 7,
+                onChange: (e) => setWatchedStatsDays(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(watchedStatsDays) || 7, 30)); setWatchedStatsDays(n); patch({ watchedStatsDays: n }, '观看统计回看天数') },
+              }))) : null,
+
+          // P3-B 收件箱分类
+          h(ToggleRow, {
+            label: '收件箱扫描（分类回复/@/点赞通知）',
+            note: '开了以后每轮扫一眼收件箱，在报告里分类列出回复/@/点赞。只读不回（回不回走回复评论那套规矩）。借鉴 dsh-bili-eyes。',
+            on: Boolean(inboxScan),
+            onChange: (v) => { setInboxScan(v); patch({ inboxScanEnabled: v }, '收件箱扫描') },
+          }),
+          inboxScan ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '每轮最多处理几条'),
+                h('div', { 'data-bd-note': '' }, '每类（回复/@）最多列几条（1–20，默认 5）')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 20,
+                value: inboxPerRound ?? 5,
+                onChange: (e) => setInboxPerRound(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(inboxPerRound) || 5, 20)); setInboxPerRound(n); patch({ inboxScanPerRound: n }, '收件箱每轮条数') },
               }))) : null,
 
         /* ── 环境与账号 ── */

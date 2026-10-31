@@ -32,6 +32,11 @@ from mcp.types import ImageContent, TextContent
 from bilibili_api import video, search, comment, Credential, dynamic, opus
 from bilibili_api import hot, rank, user, session, favorite_list
 from bilibili_api import homepage
+# P3-A 观看统计：bilibili_api 的 history 模块（不同版本可能叫法不一，try 住）
+try:
+    from bilibili_api import history as _bili_history
+except Exception:
+    _bili_history = None
 from bilibili_api.video_uploader import (
     VideoUploader, VideoUploaderPage, VideoMeta, Lines,
 )
@@ -1262,6 +1267,57 @@ async def bili_received_at_and_likes() -> str:
     except Exception as e:
         result["likes_error"] = str(e)
     return json.dumps(result, ensure_ascii=False)
+
+
+# ========== Tool 25: 观看历史（P3-A 观看统计报告） ==========
+
+@tool()
+async def bili_watched_history(num: int = 100) -> str:
+    """
+    获取B站观看历史记录（最近看过的视频，含观看进度和时长）。
+    借鉴 apiaoapiao/dsh-bili-statistics 的观看历史 API 用法。
+
+    Args:
+        num: 获取多少条（默认 100，最大 500）
+
+    Returns:
+        JSON：观看历史列表，每条含 bvid / title / view_at / progress / duration / completion
+    """
+    cred = get_cred()
+    try:
+        if _bili_history is None:
+            return json.dumps({"error": "bilibili_api.history 模块不可用（请升级 bilibili-api-python）"}, ensure_ascii=False)
+        await _throttle()
+        raw = await _bili_history.get_history(credential=cred)
+        items = []
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, dict):
+            items = raw.get("data", raw.get("archives", raw.get("list", [])))
+            if isinstance(items, dict):
+                items = items.get("list", [])
+        out = []
+        for it in (items or [])[:max(1, min(num, 500))]:
+            if not isinstance(it, dict):
+                continue
+            bvid = it.get("bvid", "")
+            if not bvid:
+                continue
+            duration = max(0, int(it.get("duration", 0) or 0))
+            progress = max(0, int(it.get("progress", 0) or 0))
+            completion = round(progress / duration, 3) if duration > 0 else 0
+            out.append({
+                "bvid": bvid,
+                "title": it.get("title", ""),
+                "view_at": int(it.get("view_at", 0) or 0),
+                "progress": progress,
+                "duration": duration,
+                "completion": completion,
+                "up": (it.get("owner") or {}).get("name", ""),
+            })
+        return json.dumps({"ok": True, "total": len(out), "items": out}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
 # ========== 值班轮窄口 IO（2026-10-24 · issue #96 安全加固）==========
