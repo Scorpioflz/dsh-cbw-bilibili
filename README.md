@@ -18,14 +18,14 @@ A DeepSeek Harness (DSH) plugin that watches Bilibili for you — searches, read
 - **Timeout watchdog** — `runTimeoutMinutes` (default 20)
 
 ### Added in this fork
-- **Fixed session continuity** — duty rounds reuse a fixed `sessionId` via dsh-web-service REST/SSE instead of one-shot CLI spawn, preserving full conversation context across rounds. Auto-fallback to CLI spawn when web-service is unavailable.
+- **Fixed session continuity** — duty rounds reuse a fixed `sessionId` via CLI `--session-id` parameter, preserving full conversation context across rounds. Fixed session skips duty bucket archiving.
 - **Master profile & hobby analysis** — `masterUid` identifies the master; `bili_analyze_hobby` analyzes public favorites + following list → hobby画像 → injected into @dsh-cbw/memory as long-term facts. Configurable refresh cycle (`hobbyRefreshDays`, default 30).
 - **Decoupled identity** — `masterUid` (master, by UID) vs `mentionNames` (comment @-list, by nickname, multiple) vs `dmRecipients` (DM recipients, multiple). Friends can be added to share recommendations without being the master.
 - **Interest learning with half-life decay** — replaces static `keywords` config; auto-extracts interest words from picked videos, decays over time. *[Borrowed from bilihave/dsh-whale-panel]*
 - **Storyboard frames** — multi-grid拼接 instead of single frames, higher token efficiency. *[Borrowed from QiuYeDx/dsh-bili-eyes]*
 - **Comment three-layer safety gate** — hard blocks for politics/government/frontier-science. *[Borrowed from bilihave/dsh-whale-panel]*
-- **Watch statistics report** — completion rate, time distribution dimensions in daily report. *[Borrowed from apiaoapiao/dsh-bili-statistics]*
-- **Inbox auto-classification** — reply/@/DM categorized and handled. *[Borrowed from QiuYeDx/dsh-bili-eyes]*
+- **Watch statistics report** — completion rate (watched/skipped/partial), hourly time distribution, late-night ratio (22:00–2:00), top UPs in daily report. *[Borrowed from apiaoapiao/dsh-bili-statistics]*
+- **Inbox auto-classification** — replies/@/likes/DM categorized and listed in daily report (read-only, no auto-reply). *[Borrowed from QiuYeDx/dsh-bili-eyes]*
 
 ## Derived From
 
@@ -41,7 +41,7 @@ All upstream code (`index.js`, `client.js`, `lib/`, `prompts/`, `vendor/`, `prof
 ## Dependencies
 
 ### Required (for added features)
-- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — fixed-session continuity uses its REST/SSE session API. Auto-detected at `127.0.0.1:3080` (configurable via `webapiBase`). When unavailable, the plugin auto-falls back to one-shot CLI spawn (upstream behavior).
+- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — optional; fixed-session uses CLI `--session-id` (not web-service REST). web-service base URL configurable via `webapiBase` for P1 hobby analysis tool API.
 - **[@dsh-cbw/memory](https://github.com/Scorpioflz/dsh-cbw-memory)** — hobby画像 and interest words are stored as long-term facts. Optional but recommended; without it,画像 is only kept locally in `hobby.json`.
 
 ### Bundled
@@ -75,13 +75,13 @@ All upstream code (`index.js`, `client.js`, `lib/`, `prompts/`, `vendor/`, `prof
 
 | Area | Upstream (dsh-bili-scroll) | This fork (@dsh-cbw/bilibili) |
 |---|---|---|
-| Duty session | One-shot CLI spawn per round, no context | Fixed `sessionId` reuse via web-service, full context (fallback to CLI) |
-| Master identity | `mentionName` (nickname, single) + `dmUid` | `masterUid` (UID) + `mentionNames[]` (nicknames) + `dmRecipients[]` |
+| Duty session | One-shot CLI spawn per round, no context | Fixed `sessionId` reuse via CLI `--session-id`, full context; fixed session skips bucket archiving |
+| Master identity | `mentionName` (nickname, single) + `dmUid` | `masterUid` (UID) + `mentionNames[]` (nicknames) + `dmRecipientUids[]` (UIDs) |
 | Hobby analysis | None | `bili_user_favorites` / `bili_user_profile` / `bili_analyze_hobby` |
 | Search keywords | Static `keywords[]` config | Auto-learned interest words with half-life decay |
-| Frames | Single frame `bili_frames` | Storyboard multi-grid拼接 |
+| Frames | Single frame `bili_frames` | Storyboard multi-grid拼接 `bili_storyboard` |
 | Comment gate | Tone gate + autoComment gate | + three-layer hard block (politics/government/frontier) |
-| Report | Full/brief/off | + statistics dimensions (completion, time distribution) |
+| Report | Full/brief/off | + watch statistics (completion/time distribution/late-night ratio) + inbox classification (replies/@/likes) |
 
 ## Installation
 
@@ -109,14 +109,15 @@ All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/con
 |---|---|---|
 | `masterUid` | `0` | Master's Bilibili UID. Used for hobby analysis target, DM watch whitelist |
 | `mentionNames` | `[]` | Comment @-list (nicknames, multiple). Friends can be included |
-| `dmRecipients` | `[]` | DM recipients list (`{uid, name}`, multiple) |
+| `dmRecipientUids` | `[]` | DM recipients UIDs (string array, multiple) |
 
 ### Fixed session (new in this fork)
 | Parameter | Default | Description |
 |---|---|---|
-| `fixedSession` | `true` | Enable fixed-session reuse; auto-fallback to CLI when web-service unavailable |
-| `sessionId` | `'bili-duty-fixed'` | Fixed session ID for duty rounds |
-| `webapiBase` | `''` | dsh-web-service base URL (empty = auto-detect `127.0.0.1:3080`) |
+| `fixedSession` | `true` | Enable fixed-session reuse via CLI `--session-id` |
+| `dutySessionId` | `'bili-duty-fixed'` | Fixed session ID for duty rounds |
+| `dmSessionId` | `'bili-dm-fixed'` | Fixed session ID for DM replies |
+| `webapiBase` | `''` | dsh-web-service base URL (for P1 hobby analysis API; empty = auto-detect `127.0.0.1:3080`) |
 | `webapiKey` | `''` | API Key (empty = local no-auth) |
 
 ### Hobby analysis (new in this fork)
@@ -124,6 +125,21 @@ All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/con
 |---|---|---|
 | `hobbyRefreshDays` | `30` | Master画像 refresh cycle in days (increase to 60/90/180 if token-heavy) |
 | `hobbyMaxVideos` | `500` | Max favorite videos to analyze per refresh (controls token cost) |
+
+### Watch statistics & inbox (new in this fork)
+| Parameter | Default | Description |
+|---|---|---|
+| `watchedStatsEnabled` | `true` | Append watch statistics section to daily report |
+| `watchedStatsDays` | `7` | Lookback days for statistics (1–30) |
+| `inboxScanEnabled` | `false` | Scan inbox (replies/@/likes) and classify in daily report |
+| `inboxScanPerRound` | `5` | Max items per category per round (1–20) |
+
+### Interest learning & comment gate (new in this fork)
+| Parameter | Default | Description |
+|---|---|---|
+| `interestLearnEnabled` | `true` | Auto-extract interest words from picked videos with half-life decay |
+| `interestHalfLifeDays` | `14` | Half-life for interest word scores (1–90 days) |
+| `commentHardGate` | `true` | Three-layer hard block for comments (politics/government/frontier) |
 
 ### Inherited from upstream
 | Parameter | Default | Description |
@@ -159,6 +175,9 @@ All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/con
 | `bili_user_favorites` | List user's public favorites + videos *(new)* |
 | `bili_user_profile` | Get user's public info + following list *(new)* |
 | `bili_analyze_hobby` | Analyze hobby → output画像 JSON → store to memory *(new)* |
+| `bili_storyboard` | Multi-grid storyboard frames (6 frames at once) *(new)* |
+| `bili_watched_stats` | Compute watch statistics (completion/time distribution/late-night ratio) *(new)* |
+| `bili_inbox` | Scan & classify inbox (replies/@/likes/DM) *(new)* |
 
 ## License
 

@@ -18,14 +18,14 @@ DeepSeek Harness (DSH) 插件：每天替你刷一轮 B站 —— 搜视频、�
 - **超时看门狗** — `runTimeoutMinutes`（默认 20）
 
 ### 本 fork 新增
-- **固定会话延续** — 值班轮通过 dsh-web-service REST/SSE 复用固定 `sessionId`，而非一次性 CLI spawn，跨轮保持完整对话上下文。web-service 不可用时自动回退到 CLI spawn。
+- **固定会话延续** — 值班轮通过 CLI `--session-id` 参数复用固定 `sessionId`，跨轮保持完整对话上下文。固定会话下跳过值班桶归档。
 - **主人画像与爱好分析** — `masterUid` 识别主人；`bili_analyze_hobby` 分析公开收藏夹 + 关注列表 → 爱好画像 → 写入 @dsh-cbw/memory 作为长期事实。刷新周期可配（`hobbyRefreshDays`，默认 30 天）。
 - **身份解耦** — `masterUid`（主人，UID）vs `mentionNames`（评论 @ 清单，昵称，可多个）vs `dmRecipients`（私信收件人，可多个）。朋友也能加入分享推荐，不必是主人。
 - **兴趣学习 + 半衰期淡忘** — 替代死配置 `keywords`；从值班轮挑的视频自动提取兴趣词，按半衰期淡忘。*[借鉴 bilihave/dsh-whale-panel]*
 - **分镜图** — 多格拼一张替代单帧，token 效率更高。*[借鉴 QiuYeDx/dsh-bili-eyes]*
 - **评论三层安全闸门** — 政治/政府/前沿科学硬禁区。*[借鉴 bilihave/dsh-whale-panel]*
-- **观看统计报告** — 日报加入完成度、时间分布等统计维度。*[借鉴 apiaoapiao/dsh-bili-statistics]*
-- **收件箱自动分类** — 回复/@/私信分类处理。*[借鉴 QiuYeDx/dsh-bili-eyes]*
+- **观看统计报告** — 日报加入完成度（看完/跳过/部分）、按小时时间分布、深夜比例（22:00–2:00）、常看 UP。*[借鉴 apiaoapiao/dsh-bili-statistics]*
+- **收件箱自动分类** — 回复/@/点赞/私信分类列在日报里（只读不回，回不回走回复评论那套规矩）。*[借鉴 QiuYeDx/dsh-bili-eyes]*
 
 ## 派生声明
 
@@ -41,7 +41,7 @@ git merge upstream/main
 ## 依赖
 
 ### 功能依赖（新增功能需要）
-- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — 固定会话延续使用其 REST/SSE 会话 API。自动探测 `127.0.0.1:3080`（可通过 `webapiBase` 配置）。不可用时插件自动回退到一次性 CLI spawn（上游行为）。
+- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — 可选；固定会话用 CLI `--session-id`（不走 web-service REST）。`webapiBase` 配置 web-service 地址供 P1 爱好分析工具 API 用。
 - **[@dsh-cbw/memory](https://github.com/Scorpioflz/dsh-cbw-memory)** — 爱好画像和兴趣词作为长期事实存储。可选但推荐；不装则画像仅本地存于 `hobby.json`。
 
 ### 内置
@@ -75,13 +75,13 @@ git merge upstream/main
 
 | 方面 | 上游（dsh-bili-scroll） | 本 fork（@dsh-cbw/bilibili） |
 |---|---|---|
-| 值班会话 | 每轮一次性 CLI spawn，无上下文 | 固定 `sessionId` 复用（经 web-service），完整上下文（不可用时回退 CLI） |
-| 主人识别 | `mentionName`（昵称，单个）+ `dmUid` | `masterUid`（UID）+ `mentionNames[]`（昵称）+ `dmRecipients[]` |
+| 值班会话 | 每轮一次性 CLI spawn，无上下文 | 固定 `sessionId` 复用（CLI `--session-id`），完整上下文；固定会话跳过桶归档 |
+| 主人识别 | `mentionName`（昵称，单个）+ `dmUid` | `masterUid`（UID）+ `mentionNames[]`（昵称）+ `dmRecipientUids[]`（UID） |
 | 爱好分析 | 无 | `bili_user_favorites` / `bili_user_profile` / `bili_analyze_hobby` |
 | 搜索关键词 | 死配置 `keywords[]` | 自动学习兴趣词 + 半衰期淡忘 |
-| 帧图 | 单帧 `bili_frames` | 分镜多格拼图 |
+| 帧图 | 单帧 `bili_frames` | 分镜多格 `bili_storyboard`（6 帧一次） |
 | 评论闸门 | 语感闸门 + autoComment 闸门 | + 三层硬禁区（政治/政府/前沿） |
-| 报告 | full/brief/off | + 统计维度（完成度、时间分布） |
+| 报告 | full/brief/off | + 观看统计（完成度/时间分布/深夜比例）+ 收件箱分类（回复/@/点赞） |
 
 ## 安装
 
@@ -109,14 +109,15 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 |---|---|---|
 | `masterUid` | `0` | 主人 B站 UID。用于爱好分析目标、私信监听白名单 |
 | `mentionNames` | `[]` | 评论 @ 清单（昵称，可多个）。朋友也可加入 |
-| `dmRecipients` | `[]` | 私信收件人清单（`{uid, name}`，可多个） |
+| `dmRecipientUids` | `[]` | 私信收件人 UID 清单（字符串数组，可多个） |
 
 ### 固定会话（本 fork 新增）
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `fixedSession` | `true` | 开启固定会话复用；web-service 不可用时自动回退 CLI |
-| `sessionId` | `'bili-duty-fixed'` | 固定会话 ID |
-| `webapiBase` | `''` | dsh-web-service 地址（空 = 自动探测 `127.0.0.1:3080`） |
+| `fixedSession` | `true` | 开启固定会话复用（CLI `--session-id`） |
+| `dutySessionId` | `'bili-duty-fixed'` | 值班固定会话 ID |
+| `dmSessionId` | `'bili-dm-fixed'` | 私信固定会话 ID |
+| `webapiBase` | `''` | dsh-web-service 地址（P1 爱好分析工具用；空 = 自动探测 `127.0.0.1:3080`） |
 | `webapiKey` | `''` | API Key（空 = 本机免鉴权） |
 
 ### 爱好分析（本 fork 新增）
@@ -124,6 +125,21 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 |---|---|---|
 | `hobbyRefreshDays` | `30` | 主人画像刷新周期（天）。token 紧张可调 60/90/180 |
 | `hobbyMaxVideos` | `500` | 单次分析最多遍历多少条收藏视频（控 token） |
+
+### 观看统计与收件箱（本 fork 新增）
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `watchedStatsEnabled` | `true` | 在日报里附加观看统计段 |
+| `watchedStatsDays` | `7` | 统计回看天数（1–30） |
+| `inboxScanEnabled` | `false` | 扫描收件箱（回复/@/点赞）并分类列在日报里 |
+| `inboxScanPerRound` | `5` | 每轮每类最多列几条（1–20） |
+
+### 兴趣学习与评论闸门（本 fork 新增）
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `interestLearnEnabled` | `true` | 从值班轮挑的视频自动提取兴趣词 + 半衰期淡忘 |
+| `interestHalfLifeDays` | `14` | 兴趣词半衰期（天，1–90） |
+| `commentHardGate` | `true` | 评论三层硬禁区（政治/政府/前沿科学） |
 
 ### 继承自上游
 | 参数 | 默认 | 说明 |
@@ -159,6 +175,9 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `bili_user_favorites` | 列用户公开收藏夹 + 视频 *(新增)* |
 | `bili_user_profile` | 获取用户公开信息 + 关注列表 *(新增)* |
 | `bili_analyze_hobby` | 综合分析爱好 → 输出画像 JSON → 存入记忆 *(新增)* |
+| `bili_storyboard` | 分镜多格帧（一次取 6 帧） *(新增)* |
+| `bili_watched_stats` | 统计观看历史（完成度/时间分布/深夜比例） *(新增)* |
+| `bili_inbox` | 扫描并分类收件箱（回复/@/点赞/私信） *(新增)* |
 
 ## 许可
 
