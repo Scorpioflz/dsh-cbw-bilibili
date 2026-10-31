@@ -32,11 +32,7 @@ from mcp.types import ImageContent, TextContent
 from bilibili_api import video, search, comment, Credential, dynamic, opus
 from bilibili_api import hot, rank, user, session, favorite_list
 from bilibili_api import homepage
-# P3-A 观看统计：bilibili_api 的 history 模块（不同版本可能叫法不一，try 住）
-try:
-    from bilibili_api import history as _bili_history
-except Exception:
-    _bili_history = None
+# P3-A 观看统计：bilibili_api 17.x 没有 history 模块，用 user.get_self_history_new 替代
 from bilibili_api.video_uploader import (
     VideoUploader, VideoUploaderPage, VideoMeta, Lines,
 )
@@ -1285,10 +1281,8 @@ async def bili_watched_history(num: int = 100) -> str:
     """
     cred = get_cred()
     try:
-        if _bili_history is None:
-            return json.dumps({"error": "bilibili_api.history 模块不可用（请升级 bilibili-api-python）"}, ensure_ascii=False)
         await _throttle()
-        raw = await _bili_history.get_history(credential=cred)
+        raw = await user.get_self_history_new(credential=cred, ps=min(num, 100), max=num)
         items = []
         if isinstance(raw, list):
             items = raw
