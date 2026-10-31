@@ -102,7 +102,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 
 ## 配置
 
-所有设置可通过 DSH 设置页或 `~/.dsh/bili-duty/config.json` 配置。
+所有设置可通过 DSH 设置页或 `~/.dsh/dsh-cbw-bilibili/config.json` 配置。
 
 ### 身份识别（本 fork 新增）
 | 参数 | 默认 | 说明 |
@@ -115,7 +115,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `fixedSession` | `true` | 开启固定会话复用（CLI `--session-id`） |
-| `dutySessionId` | `'bili-duty-fixed'` | 值班固定会话 ID |
+| `dutySessionId` | `'dsh-cbw-bili-fixed'` | 值班固定会话 ID |
 | `dmSessionId` | `'bili-dm-fixed'` | 私信固定会话 ID |
 | `webapiBase` | `''` | dsh-web-service 地址（P1 爱好分析工具用；空 = 自动探测 `127.0.0.1:3080`） |
 | `webapiKey` | `''` | API Key（空 = 本机免鉴权） |
@@ -149,7 +149,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `dmMode` | `'only'` | 私信投递：off / only / both |
 | `keywords` | `[]` | 搜索关键词（空 = 用章程默认；兴趣学习开启后会被覆盖） |
 | `workspace` | `''` | 值班轮工作目录（会话归该工作区） |
-| `headlessProfile` | `'bili-duty'` | 值班轮 profile |
+| `headlessProfile` | `'dsh-cbw-bili'` | 值班轮 profile |
 | `runTimeoutMinutes` | `20` | 每轮最多跑多久（分钟） |
 | `modelProvider` | `''` | 值班轮模型 provider（空 = 跟随当前会话） |
 | `modelName` | `''` | 值班轮模型名 |

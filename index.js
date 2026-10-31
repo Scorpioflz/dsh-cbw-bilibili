@@ -8,9 +8,9 @@
  *      开了哪个窗口才在哪个窗口自动跑；「定量刷」的数字是**每天总量上限**。
  *   3. **跑一轮** = 起一个 `dsh --profile headless <prompt>`（跟老方案同一条路，已被验证过），
  *      把 `duty.md` 交给它，报告写进 `<家>/out/<日期>.md`。
- *   4. **设置页**（`client.js`）通过 `/api/bili-duty/*` 读写配置、看状态、扫码登录。
+ *   4. **设置页**（`client.js`）通过 `/api/dsh-cbw-bili/*` 读写配置、看状态、扫码登录。
  *
- * 家里（`$DSH_HOME/bili-duty/`）都有什么：`config.json` / `mcp_server.py`（从 vendor 铺过来，
+ * 家里（`$DSH_HOME/dsh-cbw-bilibili/`）都有什么：`config.json` / `mcp_server.py`（从 vendor 铺过来，
  * 这样凭证 `bili_credential.json` 落在家里而不是插件包里）/ `duty.md` / `out/` / `duty.log`。
  * ============================================================================
  */
@@ -81,7 +81,7 @@ export const Config = !z ? undefined : z.object({
   dshBin: z.string().default('').extra('volatile', true),
   /** headless 那一轮用哪个 profile */
   // ⭐ 2.0.5：默认换成"最小权限 profile"（只有 B站 MCP + 窄口 IO，没有文件系统/命令/联网）
-  headlessProfile: z.string().default('bili-duty').extra('volatile', true),
+  headlessProfile: z.string().default('dsh-cbw-bili').extra('volatile', true),
   /** 给那一轮叠一份插件自己的 patch（把 B站 MCP 挂上）—— 用户 profile 一个字都不用改 */
   overlayMcp: z.boolean().default(true).extra('volatile', true),
   /** ⭐ 一轮最多跑多久（分钟）—— 超时自动收掉；模型（尤其非 DeepSeek）会陷进循环，得有个上限 */
@@ -91,6 +91,8 @@ export const Config = !z ? undefined : z.object({
   /** ⭐ 这一轮用哪个**模型**（模型 id，如 deepseek-flash）；留空 = 跟随当前会话 */
   modelName: z.string().default('').extra('volatile', true),
   /** 跑 headless 时的工作目录 */
+  /** ⭐ 人设提示词开关：默认关（人设插件已全局注入，不需要每次发送）；开了才用下面那个人设提示词 */
+  personaEnabled: z.boolean().default(false).extra('volatile', true),
   /** ⭐ 人设提示词：使用者想让它怎么说话（比"填工作区"对新手友好得多）· 留空 = 按中性说话 */
   personaPrompt: z.string().default('').extra('volatile', true),
   /** 私信监听：只认主人本人发来的私信，有新消息就回一句 · 2.0 起默认开（查私信不花 token，只有真有人发消息才回一句） */
@@ -111,9 +113,9 @@ export const Config = !z ? undefined : z.object({
   /** ⭐ P0-B 固定会话：值班轮复用固定 sessionId（通过 CLI --session-id），保持跨轮对话上下文 */
   fixedSession: z.boolean().default(true).extra('volatile', true),
   /** ⭐ 固定会话 ID（值班轮） */
-  dutySessionId: z.string().default('bili-duty-fixed').extra('volatile', true),
+  dutySessionId: z.string().default('dsh-cbw-bili-fixed').extra('volatile', true),
   /** ⭐ 固定会话 ID（私信回复） */
-  dmSessionId: z.string().default('bili-dm-fixed').extra('volatile', true),
+  dmSessionId: z.string().default('dsh-cbw-bili-dm-fixed').extra('volatile', true),
   /** ⭐ dsh-web-service 地址（空=自动探测 127.0.0.1:3080；供 P1 爱好分析工具用） */
   webapiBase: z.string().default('').extra('volatile', true),
   /** ⭐ dsh-web-service API Key（空=本机免鉴权） */
@@ -274,7 +276,7 @@ function reportMeta() {
   const log = (msg) => {
     const line = `${new Date().toISOString()}  ${msg}`
     try { appendFileSync(logFile, line + '\n', 'utf8') } catch { /* 日志写不进去也不致命 */ }
-    try { ctx.logger?.info?.(`[bili-duty] ${msg}`) } catch { /* 没有 logger 就算了 */ }
+    try { ctx.logger?.info?.(`[dsh-cbw-bili] ${msg}`) } catch { /* 没有 logger 就算了 */ }
   }
 
   // 宿主依赖是从哪儿取的（桌面版那次事故的排查看这里：duty.log 里会写明白）
@@ -293,14 +295,14 @@ function reportMeta() {
   const DEFAULTS = {
     dmWatch: true, dmWatchMinutes: 1, dmReplyPerDay: 0, dmOwnerUid: 0,
     masterUid: 0, mentionNames: [], dmRecipientUids: [],
-    personaPrompt: '',
+    personaEnabled: false, personaPrompt: '',
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
     dmMode: 'only', dmUid: 0,
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1, favFolderId: 0,
     // ⭐ 2.3.0：手动轮 / 抓取量 / 排除词 / 评论长度 —— 少一项 normalize 就会把用户存的值丢掉
     manualMax: 3, manualCooldownMin: 10, searchSort: 'pubdate', searchPages: 2, fetchPerRound: 8, excludeWords: [], commentLength: 'medium',
     modelProvider: '', modelName: '', runTimeoutMinutes: 20,
-    fixedSession: true, dutySessionId: 'bili-duty-fixed', dmSessionId: 'bili-dm-fixed', webapiBase: '', webapiKey: '',
+    fixedSession: true, dutySessionId: 'dsh-cbw-bili-fixed', dmSessionId: 'dsh-cbw-bili-dm-fixed', webapiBase: '', webapiKey: '',
     // P1 爱好分析
     hobbyRefreshDays: 30, hobbyMaxVideos: 500, hobbyLastRefresh: 0,
     // P2 兴趣学习+半衰期
@@ -340,6 +342,7 @@ function reportMeta() {
     const p = { ...patch }
     if ('perDay' in p) p.perDay = Math.max(0, Math.min(Number(p.perDay) || 0, 50))
     if ('reportLevel' in p) p.reportLevel = ['full', 'brief', 'off'].includes(String(p.reportLevel)) ? String(p.reportLevel) : 'full'
+    if ('personaEnabled' in p) p.personaEnabled = Boolean(p.personaEnabled)
     // ⭐ 2.0.5（issue #89）：人设上限 8000 → 60000；**截断时要出声**（以前静默砍，用户以为写进去了 ✗）
     if ('personaPrompt' in p) {
       const raw = String(p.personaPrompt || '')
@@ -366,8 +369,8 @@ function reportMeta() {
     if ('modelName' in p) p.modelName = String(p.modelName || '').trim().slice(0, 160)
     if ('runTimeoutMinutes' in p) p.runTimeoutMinutes = Math.max(1, Math.min(Number(p.runTimeoutMinutes) || 20, 120))
     if ('fixedSession' in p) p.fixedSession = Boolean(p.fixedSession)
-    if ('dutySessionId' in p) p.dutySessionId = String(p.dutySessionId || '').trim().slice(0, 120) || 'bili-duty-fixed'
-    if ('dmSessionId' in p) p.dmSessionId = String(p.dmSessionId || '').trim().slice(0, 120) || 'bili-dm-fixed'
+    if ('dutySessionId' in p) p.dutySessionId = String(p.dutySessionId || '').trim().slice(0, 120) || 'dsh-cbw-bili-fixed'
+    if ('dmSessionId' in p) p.dmSessionId = String(p.dmSessionId || '').trim().slice(0, 120) || 'dsh-cbw-bili-dm-fixed'
     if ('webapiBase' in p) p.webapiBase = String(p.webapiBase || '').trim().slice(0, 300)
     if ('webapiKey' in p) p.webapiKey = String(p.webapiKey || '').trim().slice(0, 300)
     // P1 爱好分析
@@ -433,7 +436,7 @@ function reportMeta() {
    * ⚠️ DSH 自带的「插件设置」页**不需要注册** —— 老代码那句 `ctx.settings.register(...)` 是个不存在的方法，
    *    每次都抛 TypeError、被 catch 吞掉（2026-10-17 读宿主源码 @deepseek-ai/dsh-settings 才明白）：
    *    describe() 自己扫 profile 里**带 volatile 字段**的条目列出来（lib/index.js:413-452），
-   *    命名空间 ns **等于 loader 条目的 id**（我们 cordis.patch.yml 里是 `bili-scroll`，不是老注释写的 bili-duty）。
+   *    命名空间 ns **等于 loader 条目的 id**（我们 cordis.patch.yml 里是 `bili-scroll`，不是老注释写的 dsh-cbw-bilibili）。
    * 另外两条同样要紧（都是读宿主源码得来的，别再想当然）：
    *    ① `apply(ctx, config)` 收到的 config 就是 fiber.config 本体，volatile 字段一改宿主**就地**改它
    *       （cordis-plugin-loader/src/config/entry.ts：`this.fiber._config = …` + `_commitVolatile()`）⇒
@@ -1078,6 +1081,11 @@ function reportMeta() {
     }
   }
 
+  /** 读取持久化的画像结果（供设置页查看 + promptFor 整合兴趣） */
+  const readHobbyProfile = () => {
+    try { return JSON.parse(readFileSync(join(stateDir, 'hobby-profile.json'), 'utf8')) } catch { return null }
+  }
+
   /** P1 爱好分析核心逻辑（工具和 HTTP 路由共用） */
   const doHobbyAnalyze = async (uid, nickname, shouldInject = true) => {
     if (!hasCredential()) return { ok: false, error: '还没扫码登录 B站' }
@@ -1153,6 +1161,9 @@ function reportMeta() {
     }
 
     try { await persistCfg({ hobbyLastRefresh: now }) } catch { /* 不挡 */ }
+
+    // ⭐ 持久化画像结果，供设置页随时查看 + promptFor 整合兴趣
+    try { writeFileSync(join(stateDir, 'hobby-profile.json'), JSON.stringify(result, null, 2), 'utf8') } catch { /* 不挡 */ }
 
     return result
   }
@@ -1728,7 +1739,7 @@ function reportMeta() {
     // ⭐ 2026-10-21：优先用「人设提示词」这个框（主人原话：工作区确实可以不要，有人不会用，改成直接填人设提示词确实更方便）
     // ⭐ 2026-10-21：人设框既收「文字」，也收「一个路径」——填路径就去读那个文件/目录下的 AGENTS.md，
     //    这样"从一个文件导入"和"自己写一段"用同一个框，不用额外按钮 ✓（老用户的工作区兜底逻辑不变）
-    const personaRaw = String(cfg.personaPrompt || '').trim()
+    const personaRaw = cfg.personaEnabled ? String(cfg.personaPrompt || '').trim() : ''
     let persona = personaRaw
     let personaFromFile = ''
     if (personaRaw && !personaRaw.includes('\n')) {
@@ -1832,20 +1843,26 @@ function reportMeta() {
       // ⭐ 2026-10-24：留空不再用内置关键词（那会让所有用户刷同一批视频、评论区扎堆）
       //    ⇒ 留空 = 用 `bili_recommend` 刷**这个账号的首页推荐流**，按各自画像天然散开 ✓
       // ⭐ P2-A：留空时优先用学习兴趣词（半衰期淡忘），没有才退到推荐流
+      // ⭐ 整合：手动 keywords + 画像 primaryInterests + 学习兴趣（去重后统一使用）
       + (() => {
+        const hobby = readHobbyProfile()
+        const hobbyInterests = (hobby?.hobbyProfile?.primaryInterests || []).filter(Boolean)
+        const learned = getTopInterests(8)
+        const allInterests = [...new Set([...kws, ...hobbyInterests, ...learned])]
         if (kws.length) {
-          return `关键词用这些：${kws.join('、')}（用 bili_search 搜）。`
+          const extra = allInterests.filter((w) => !kws.includes(w))
+          return `关键词用这些：${kws.join('、')}${extra.length ? '（补充兴趣词：' + extra.join('、') + '）' : ''}（用 bili_search 搜）。`
             + `排序用 ${cfg.searchSort || 'pubdate'}（pubdate=最新 · click=播放 · dm=弹幕 · totalrank=综合）；`
             + `翻页：${Math.max(1, Number(cfg.searchPages) || 2)} 页 —— 用 bili_search(page=1..N)，每页扫一眼标题再决定，别只看第一页；`
             + `这一轮最多**细看** ${Math.max(1, Number(cfg.fetchPerRound) || 8)} 条（读字幕 / 评论都算一次请求），其余的只扫标题，别把候选全读一遍；`
         }
-        const learned = getTopInterests(8)
-        if (learned.length) {
-          return `⭐ 没手填关键词，但学到了兴趣词：${learned.join('、')}（用 bili_search 搜，每个词搜一页）。`
-            + `这些词从你以前挑中的视频标题里提取、按半衰期淡忘（${cfg.interestHalfLifeDays || 14} 天半衰期）。`
+        if (allInterests.length) {
+          const src = hobbyInterests.length ? '画像分析' : '学习'
+          return `⭐ 没手填关键词，但${src}到了兴趣词：${allInterests.join('、')}（用 bili_search 搜，每个词搜一页）。`
+            + `这些词从${hobbyInterests.length ? '主人收藏夹分析' : '以前挑中的视频标题提取、按半衰期淡忘（' + (cfg.interestHalfLifeDays || 14) + ' 天半衰期）'}得到。`
             + `排序用 ${cfg.searchSort || 'pubdate'}；这一轮最多**细看** ${Math.max(1, Number(cfg.fetchPerRound) || 8)} 条。`
         }
-        return '没填关键词、也没学到兴趣词 ⇒ **这一轮用 bili_recommend 刷首页推荐流**（不要用 bili_search 搜固定词）。'
+        return '没填关键词、也没画像/学习兴趣词 ⇒ **这一轮用 bili_recommend 刷首页推荐流**（不要用 bili_search 搜固定词）。'
       })()
       + `本地转写：${cfg.transcribe
         ? (asrReadyNow()
@@ -1961,11 +1978,11 @@ function reportMeta() {
   }
 
 
-  // ⭐⭐ 2.0.5（issue #96 / PR #97 思路）：把「值班轮专用 profile」铺到 <DSH_HOME>/profiles/bili-duty/
+  // ⭐⭐ 2.0.5（issue #96 / PR #97 思路）：把「值班轮专用 profile」铺到 <DSH_HOME>/profiles/dsh-cbw-bili/
   //    · 组成 = dsh-base + dsh-headless + 我们那层 cordis.patch.yml（关掉 fs / shell / web / subagent / skill…）
   //    · 铺不上就明确退回 headless，并在日志里说清"这一轮不是最小权限"（失败要出声）
   let dutyProfileState = 'unknown'   // ok / missing / failed
-  const dutyProfileDir = join(dirname(stateDir), 'profiles', 'bili-duty')
+  const dutyProfileDir = join(dirname(stateDir), 'profiles', 'dsh-cbw-bili')
   const ensureDutyProfile = () => {
     try {
       const src = join(pluginDir, 'profile-template', 'bili-duty')
@@ -1990,8 +2007,8 @@ function reportMeta() {
   // 真正用的 profile：用户手填了别的就尊重；还是老默认 has headless ⇒ 用最小权限那个
   const effectiveProfile = () => {
     const want = String(cfg.headlessProfile || '').trim()
-    if (want && want !== 'headless' && want !== 'bili-duty') return want
-    return dutyProfileState === 'ok' ? 'bili-duty' : (want || 'headless')
+    if (want && want !== 'headless' && want !== 'dsh-cbw-bili') return want
+    return dutyProfileState === 'ok' ? 'dsh-cbw-bili' : (want || 'headless')
   }
 
   /**
@@ -2019,7 +2036,7 @@ function reportMeta() {
    *    `~/.dsh/profiles/headless/package.json` 里的 bundles 保持一致**，
    *    以后 headless 里加了/删了 provider 插件，记得同步这里。
    *
-   *    🔴🔴 2026-10-25（2.1.0 升级后）：2.1.0 起值班轮默认跑**最小权限的 `bili-duty` profile**
+   *    🔴🔴 2026-10-25（2.1.0 升级后）：2.1.0 起值班轮默认跑**最小权限的 `dsh-cbw-bilibili` profile**
    *    （只有 `dsh-base` + `dsh-headless` 两个 bundle）⇒ 那个 profile 里**只有 DeepSeek 两条路由**；
    *    Antigravity 只装在老的 `headless` profile 里。所以白名单不能写死，要按**这一轮实际用的 profile** 判断，
    *    否则钉着 Antigravity 的配置会直接 NO_ADAPTER、整轮白跑。
@@ -2130,10 +2147,10 @@ function reportMeta() {
     if (cfg.overlayMcp) {
       yml.push(
         '- insert:',
-        '    - id: mcp-bili-duty',
+        '    - id: mcp-dsh-cbw-bili',
         "      name: '@deepseek-ai/dsh-mcp-client'",
         '      config:',
-        '        serverName: bili-duty',
+        '        serverName: dsh-cbw-bili',
         '        transport: stdio',
         '        command: ' + yq(posix(cfg.pythonPath || 'python')),
         '        args:',
@@ -2244,16 +2261,16 @@ function reportMeta() {
 
   /* ── 值班会话的「隐形」处理 ──
    * 🔴 2026-10-25（本人反馈）：每点一次「现在跑一轮」，左侧「未分组」就多一个对话。
-   *    原因：值班轮是 `dsh --profile bili-duty <prompt>` 起的**独立会话**，它不属于任何 workspace，
+   *    原因：值班轮是 `dsh --profile dsh-cbw-bilibili <prompt>` 起的**独立会话**，它不属于任何 workspace，
    *    侧栏就把它列在「未分组」；而 `dsh headless --help` 只有 `--session-id`，**没有"不写 session"的开关**
    *    ⇒ 会话一定会落盘，插件没法阻止。能做的只是**跑完立刻归档**：DSH 的 archivedSessionIds 是全局的，
    *    侧栏默认不列已归档的会话，但对话记录还留着（要翻还能翻）。
-   *    ⚠️ 只动「桶名里带 bili-duty」的那些 session（值班轮自己的 cwd），绝不碰用户自己的会话。
+   *    ⚠️ 只动「桶名里带 dsh-cbw-bilibili」的那些 session（值班轮自己的 cwd），绝不碰用户自己的会话。
    */
   const dutySessionBucket = () => {
     try {
       const root = join(dirname(stateDir), 'sessions')
-      const bucket = readdirSync(root).find((n) => n.includes('bili-duty'))
+      const bucket = readdirSync(root).find((n) => n.includes('dsh-cbw-bili'))
       return bucket ? { dir: join(root, bucket) } : null
     } catch { return null }
   }
@@ -2438,7 +2455,7 @@ function reportMeta() {
       //    中文 / emoji 打进管道会炸（用户反馈过 UnicodeDecodeError），一律按 UTF-8 来
       // ⭐ ELECTRON_RUN_AS_NODE：**桌面版（Electron）里 spawn 出去的 node 必须带这个**，
       //    否则它当成"再开一个 Electron 应用"、什么都不干就以 0 退出（issue #5：0.17 秒、code 0、什么都没做）
-      env: uvEnv({ BILI_DUTY_HOME: stateDir, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }),
+      env: uvEnv({ DSH_CBW_BILI_HOME: stateDir, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }),
     })
     // ⚠️ 2026-10-16 issue #1（用户 `miaoxingyunduo` 贴了崩溃日志）：`duty.log` 被别的进程占着时
     //    (`EBUSY`) `appendFileSync` 会抛异常 —— 而这里是 **stream 的 data 回调**，没人接
@@ -2556,7 +2573,7 @@ function reportMeta() {
   try {
     const timer = setInterval(tick, 60_000)
     timer.unref?.()                                    // 别因为这个定时器让进程不肯退出
-    ctx.effect(() => () => clearInterval(timer), 'bili-duty: 谷时定时器')
+    ctx.effect(() => () => clearInterval(timer), 'dsh-cbw-bili: 谷时定时器')
   } catch (e) { log(`定时器没起来：${e?.message ?? e}`) }
 
   // ⭐ 2026-10-21 私信双向（2.0 的主角）：
@@ -2633,7 +2650,7 @@ function reportMeta() {
       const root = join(process.env.DSH_HOME || join(process.env.USERPROFILE || '', '.dsh'), 'sessions')
       if (!existsSync(root)) return ''
       // ⚠️ 只认"这一轮工作目录 = 插件家"那个 workspace（否则会误认到自己聊天那条会话 ✗）
-      //    命名规则：--<盘符去掉冒号>-<路径用横线拼>--（如 --C-Users-99496-.dsh-bili-duty--）
+      //    命名规则：--<盘符去掉冒号>-<路径用横线拼>--（如 --C-Users-99496-.dsh-dsh-cbw-bilibili--）
       const wantWs = '--' + stateDir.replace(/:/g, '').replace(/[\\/]/g, '-') + '--'
       let best = ''
       let bestAt = 0
@@ -2662,6 +2679,7 @@ function reportMeta() {
     // ⭐ 2.0.4（issue #74）：私信回复以前是独立拼的提示词 ⇒ **不读人设**，还爱带 markdown 和"（28 字…）"尾巴 ✗
     const persona = (() => {
       try {
+        if (!cfg.personaEnabled) return ''
         const t = String(cfg.personaPrompt || '').trim()
         if (t) return t
         const ws = String(cfg.workspace || '').trim()
@@ -2695,7 +2713,7 @@ function reportMeta() {
       const startedAt = Date.now()
       const child = spawn(dsh.command, args, {
         cwd: stateDir, shell: dsh.shell, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-        env: uvEnv({ BILI_DUTY_HOME: stateDir, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }),
+        env: uvEnv({ DSH_CBW_BILI_HOME: stateDir, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }),
       })
       const toText = (buf) => { try { const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf)); const u = b.toString('utf8'); return u.includes('\uFFFD') ? (() => { try { return new TextDecoder('gbk').decode(b) } catch { return u } })() : u } catch { return String(buf) } }
       const pick = (buf) => { try { appendFileSync(logFile, toText(buf), 'utf8') } catch { /* 丢日志也不能抛 */ } }
@@ -2820,7 +2838,7 @@ function reportMeta() {
   try { MIG_200() } catch (e) { log('迁移没跑：' + String(e?.message ?? e)) }
 
   try { startDmWatch() } catch (e) { log('私信监听没起来：' + String(e?.message ?? e)) }
-  ctx.effect(() => () => { try { if (dmTimer) clearInterval(dmTimer) } catch { /* 忽略 */ } }, 'bili-duty: 私信监听')
+  ctx.effect(() => () => { try { if (dmTimer) clearInterval(dmTimer) } catch { /* 忽略 */ } }, 'dsh-cbw-bili: 私信监听')
   // ⭐ 2.0.4：插件被卸载/宿主退出时，把还在跑的那一轮一起收掉（以前它会变孤儿进程）
   ctx.effect(() => () => {
     try {
@@ -2829,7 +2847,7 @@ function reportMeta() {
         try { dutyChild.kill() } catch { /* 杀不掉就算了 */ }
       }
     } catch { /* 忽略 */ }
-  }, 'bili-duty: 跑一轮的子进程')
+  }, 'dsh-cbw-bili: 跑一轮的子进程')
 
   /* ─────────────── HTTP（设置页用） ─────────────── */
 
@@ -3475,6 +3493,7 @@ function reportMeta() {
       installLog: installLogFile,
       // ⭐ 让设置页能显示"装到哪了"（陌生人原来只看到一句"后台在装" ✗）
       installTail: (() => { try { return readFileSync(installLogFile, 'utf8').slice(-1400) } catch { return '' } })(),
+      hobbyProfile: readHobbyProfile(),
       report: join(outDir, `${today}.md`),
       log: logFile,
     }
@@ -3520,19 +3539,19 @@ function reportMeta() {
     }
 
 
-    if (req.method === 'GET' && path === '/api/bili-duty/status') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/status') {
       try { rollSeen() } catch (e) { /* 归档失败不影响状态接口 */ }
       try { syncNotes() } catch (e) { /* 笔记失败不影响状态接口 */ }
       return sendJson(res, 200, status())
     }
-    if (req.method === 'GET' && path === '/api/bili-duty/config') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/config') {
       return sendJson(res, 200, { ok: true, config: cfg, windows: WINDOWS, home: stateDir })
     }
 
     // ⭐ 2026-10-23：这个会话是不是在「刷B站自己的工作区」里（设置里的 workspace；没配就不限制）。
     //    会话头那个「刷过的视频」tab 只在里面出现；壳子没有按会话隐藏的开关，所以由客户端拿这个结果
     //    决定注册不注册那个 view。查的是宿主 workspaceRegistry（list() 里的 sessionIds 已经是活的）。
-    if (req.method === 'GET' && path === '/api/bili-duty/session-scope') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/session-scope') {
       const sid = String(url.searchParams.get('session') || '').trim()
       const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
       const want = norm(cfg.workspace)   // 没配 workspace ⇒ 不按工作区限制（保持老行为）
@@ -3555,12 +3574,12 @@ function reportMeta() {
     }
 
     // ⭐ 2026-10-23：设置页「模型」下拉的数据源（provider / model 全从宿主 llm 服务取，不写死）
-    if (req.method === 'GET' && path === '/api/bili-duty/models') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/models') {
       const cat = await listModelCatalog()
       return sendJson(res, 200, { ok: true, ...cat, chosen: chosenModel() })
     }
 
-    if (req.method === 'POST' && path === '/api/bili-duty/config') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/config') {
       const body = await readBody(req)
       const patch = {}
       // ⭐⭐ 2026-10-27：白名单直接从 DEFAULTS 推导 —— 以前是手写的固定数组，
@@ -3596,50 +3615,50 @@ function reportMeta() {
       return sendJson(res, 200, { ok: true, config: cfg, host })
     }
 
-    if (req.method === 'POST' && path === '/api/bili-duty/run') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/run') {
       if (cfg.dmMode !== 'off' && !((Array.isArray(cfg.dmRecipientUids) && cfg.dmRecipientUids.length ? Number(cfg.dmRecipientUids[0]) : 0) > 0 || Number(cfg.dmUid) > 0)) await warmDmUid()
       return sendJson(res, 200, { ok: true, ...runDuty('manual') })
     }
 
     // P1 爱好分析（设置页触发）
-    if (req.method === 'POST' && path === '/api/bili-duty/hobby-analyze') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/hobby-analyze') {
       const body = await readBody(req)
       return sendJson(res, 200, await doHobbyAnalyze(body.uid, body.nickname, body.injectMemory !== false))
     }
 
     // P3-A 观看统计（设置页触发）
-    if (req.method === 'POST' && path === '/api/bili-duty/watched-stats') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/watched-stats') {
       const body = await readBody(req)
       return sendJson(res, 200, await doWatchedStats(body.days))
     }
 
     // P3-B 收件箱扫描（设置页触发）
-    if (req.method === 'POST' && path === '/api/bili-duty/inbox') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/inbox') {
       const body = await readBody(req)
       return sendJson(res, 200, await doInboxScan(body.limit))
     }
 
     // 建 venv + 装依赖（**不等它**：几分钟的活，进度写 install.log）
-    if (req.method === 'POST' && path === '/api/bili-duty/install') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/install') {
       return sendJson(res, 200, runInstall())
     }
 
     // 装"本地转写"那套（独立环境：faster-whisper + yt-dlp + Whisper 模型）
-    if (req.method === 'POST' && path === '/api/bili-duty/install-asr') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/install-asr') {
       return sendJson(res, 200, runAsrInstall())
 
     }
 
       // 收藏夹列表（设置页下拉用）
-      if (req.method === 'GET' && path === '/api/bili-duty/fav-folders') {
+      if (req.method === 'GET' && path === '/api/dsh-cbw-bili/fav-folders') {
         const r = await favOps(['folders'])
         return sendJson(res, 200, r && r.ok ? { ok: true, folders: r.folders || [] } : { ok: false, error: (r && r.error) || '读不到收藏夹' })
       }
       // 补收藏今天挑中的（设置页按钮）
-      if (req.method === 'POST' && path === '/api/bili-duty/fav-today') return sendJson(res, 200, await favToday('manual'))
+      if (req.method === 'POST' && path === '/api/dsh-cbw-bili/fav-today') return sendJson(res, 200, await favToday('manual'))
 
       // 「它刷过的视频」：从 seen.md 读出来（数据按天倒序，跳过的也在，理由在 status 里）
-      if (req.method === 'GET' && path === '/api/bili-duty/watched') {
+      if (req.method === 'GET' && path === '/api/dsh-cbw-bili/watched') {
           try { syncNotes() } catch (e) { /* 同上 */ }
         const all = parseSeenTable()
         const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 60))
@@ -3658,7 +3677,7 @@ function reportMeta() {
         return sendJson(res, 200, { ok: true, total: rows.length, offset, limit, rows: rows.slice(offset, offset + limit) })
       }
       // 封面（宿主代理），浏览器只跟本机说话
-      if (req.method === 'GET' && path === '/api/bili-duty/cover') {
+      if (req.method === 'GET' && path === '/api/dsh-cbw-bili/cover') {
         const got = await coverFor(String(url.searchParams.get('bv') || ''))
         if (!got) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('no cover'); return }
         res.writeHead(200, { 'content-type': got.type, 'cache-control': 'max-age=86400' })
@@ -3668,10 +3687,10 @@ function reportMeta() {
 
     // ⭐ 「复核评论」：拿判重表里最近的记录，去 B站 核一遍到底公开可见没有
     //    （设置页那个按钮、以及每轮结束 90 秒后自动跑一次，都走这里）
-    if (req.method === 'POST' && path === '/api/bili-duty/verify') return sendJson(res, 200, await runVerify('manual'))
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/verify') return sendJson(res, 200, await runVerify('manual'))
 
     // 「看今天的报告」：把报告的文本读出来给设置页显示（浏览器不能直接开本地文件 ✗）
-    if (req.method === 'GET' && path === '/api/bili-duty/report') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/report') {
       const day = String(url.searchParams.get('day') || dayKey()).replace(/[^0-9-]/g, '') || dayKey()
       const file = join(outDir, day + '.md')
       let text = ''
@@ -3681,7 +3700,7 @@ function reportMeta() {
     }
 
     // 「打开文件夹」：浏览器开不了本地目录 ⇒ 让宿主去开（只认 out / home 两个，别的不受理）
-    if (req.method === 'POST' && path === '/api/bili-duty/open') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/open') {
       const body = await readBody(req)
       const what = String(body?.what || 'out')
       // ⭐ 2026-10-21：**打开一个网页**（桌面版里 <a target=_blank> 不一定交给系统浏览器 ⇒ 改成让宿主 shell 打开）
@@ -3726,13 +3745,13 @@ function reportMeta() {
     }
 
     // 「一键升级」：点了它自己跑 add（⚠️ 之后要重启才生效）
-    if (req.method === 'POST' && path === '/api/bili-duty/upgrade') return sendJson(res, 200, runUpgrade())
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/upgrade') return sendJson(res, 200, runUpgrade())
 
     // 「检查更新」：⚠️ 只在用户点按钮时才联网（不偷偷发请求 ✓），结果缓存一天 ✓
     // ⭐ 2026-10-19（主人："现在自动更新能让扫 github 吗"）：**两条源都问** ——
     //    npm 上可能还没发上去（账号被暂停时会停在旧版），那时候 GitHub 才是最新 ✓
     //    ⇒ 谁给的版本号更新就用谁，并记住来源：一键升级按来源选 `add dsh-bili-scroll` / `add github:…` ✓
-    if (req.method === 'GET' && path === '/api/bili-duty/update') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/update') {
       const out = { ok: true, current: myVersion(), latest: '', hasNew: false, source: 'npm', page: 'https://www.npmjs.com/package/dsh-bili-scroll' }
       // ⭐ 要比谁更新，不能只比不相等 —— 否则本地版本高于 npm 时会误报有新版
       // ⭐ 2026-10-20：预发布标签要单独看 —— 以前只比三段数字 ⇒ `0.2.0-rc.1` 被当成 [0,2,0]，
@@ -3890,22 +3909,22 @@ function reportMeta() {
       return { ok: items.every((x) => x.ok), items }
     }
 
-    if (req.method === 'POST' && path === '/api/bili-duty/check') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/check') {
       return sendJson(res, 200, await checkUp())
     }
 
     // 「复制诊断信息」
-    if (req.method === 'GET' && path === '/api/bili-duty/diagnose') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/diagnose') {
       return sendJson(res, 200, { ok: true, text: diagnoseText() })
     }
 
     // 「环境自检」
-    if (req.method === 'GET' && path === '/api/bili-duty/selfcheck') {
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/selfcheck') {
       return sendJson(res, 200, await selfCheck())
     }
 
     // ── 扫码登录（设置页用）──
-    if (req.method === 'POST' && path === '/api/bili-duty/login/start') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/login/start') {
       const { key, url } = await loginStart()
       const png = await renderQrPng(cfg.pythonPath, stateDir, url)
       let qr = null
@@ -3914,7 +3933,7 @@ function reportMeta() {
       return sendJson(res, 200, { ok: true, key, url, qr })
     }
 
-    if (req.method === 'POST' && path === '/api/bili-duty/login/poll') {
+    if (req.method === 'POST' && path === '/api/dsh-cbw-bili/login/poll') {
       const body = await readBody(req)
       const r = await loginPoll(String(body.key || ''))
       if (r.state === 'ok') {
@@ -4004,7 +4023,7 @@ function reportMeta() {
   try {
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
-      path: '/api/bili-duty',
+      path: '/api/dsh-cbw-bili',
       handler: async (req, res) => {
         // ① 先过 DSH 的信任栅栏（真鉴权）
         if (fenceReject(req, res)) return
@@ -4017,15 +4036,15 @@ function reportMeta() {
           sendJson(res, 500, { ok: false, error: err?.message ?? String(err) })
         }
       },
-    }), 'bili-duty: /api/bili-duty 路由')
+    }), 'dsh-cbw-bili: /api/dsh-cbw-bili 路由')
   } catch (e) { log(`HTTP 路由没挂上：${e?.message ?? e}`) }
 
-  ctx.effect(() => () => { try { mcp?.stop() } catch { /* 收摊 */ } }, 'bili-duty: 收 MCP 子进程')
+  ctx.effect(() => () => { try { mcp?.stop() } catch { /* 收摊 */ } }, 'dsh-cbw-bili: 收 MCP 子进程')
   try { ensureDutyProfile() } catch { /* 上面已记日志 */ }
-  if (dutyProfileState === 'ok') log('值班轮用最小权限 profile：bili-duty（无文件系统 / 无命令 / 无联网）')
+  if (dutyProfileState === 'ok') log('值班轮用最小权限 profile：dsh-cbw-bilibili（无文件系统 / 无命令 / 无联网）')
   else log('⚠️ 最小权限 profile 不可用（' + dutyProfileState + '）⇒ 值班轮仍用 headless（这一轮能力偏大）')
   log(`已挂载（家=${stateDir}，python=${cfg.pythonPath}，峰谷=${cfg.peakValley ? '开' : '关'}）`)
-  // ⭐ 2026-10-25：历史清理 —— 以前每轮留下的值班会话也归档掉（只碰 bili-duty 桶）。
+  // ⭐ 2026-10-25：历史清理 —— 以前每轮留下的值班会话也归档掉（只碰 dsh-cbw-bilibili 桶）。
   //    延迟几秒：workspaceRegistry 服务未必比这个插件先就绪。
   try {
     const t = setTimeout(() => {

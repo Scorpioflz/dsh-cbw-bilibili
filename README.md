@@ -102,7 +102,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 
 ## Configuration
 
-All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/config.json`.
+All settings are configurable via the DSH settings page or `~/.dsh/dsh-cbw-bilibili/config.json`.
 
 ### Identity (new in this fork)
 | Parameter | Default | Description |
@@ -115,7 +115,7 @@ All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/con
 | Parameter | Default | Description |
 |---|---|---|
 | `fixedSession` | `true` | Enable fixed-session reuse via CLI `--session-id` |
-| `dutySessionId` | `'bili-duty-fixed'` | Fixed session ID for duty rounds |
+| `dutySessionId` | `'dsh-cbw-bili-fixed'` | Fixed session ID for duty rounds |
 | `dmSessionId` | `'bili-dm-fixed'` | Fixed session ID for DM replies |
 | `webapiBase` | `''` | dsh-web-service base URL (for P1 hobby analysis API; empty = auto-detect `127.0.0.1:3080`) |
 | `webapiKey` | `''` | API Key (empty = local no-auth) |
@@ -149,7 +149,7 @@ All settings are configurable via the DSH settings page or `~/.dsh/bili-duty/con
 | `dmMode` | `'only'` | DM delivery: off / only / both |
 | `keywords` | `[]` | Search keywords (empty = use charter defaults; overridden by interest learning) |
 | `workspace` | `''` | Duty round working directory (session归该工作区) |
-| `headlessProfile` | `'bili-duty'` | Profile for duty rounds |
+| `headlessProfile` | `'dsh-cbw-bili'` | Profile for duty rounds |
 | `runTimeoutMinutes` | `20` | Max minutes per round |
 | `modelProvider` | `''` | Model provider for duty rounds (empty = follow current session) |
 | `modelName` | `''` | Model name for duty rounds |

@@ -1322,7 +1322,7 @@ async def bili_watched_history(num: int = 100) -> str:
 #    · 输入里的竖线会被转义，标题带 | 也不会把表格弄坏
 import datetime as _dt
 
-DUTY_HOME = Path(os.environ.get("BILI_DUTY_HOME") or (Path.home() / ".dsh" / "bili-duty"))
+DUTY_HOME = Path(os.environ.get("DSH_CBW_BILI_HOME") or (Path.home() / ".dsh" / "dsh-cbw-bilibili"))
 
 
 def _duty_today() -> str:

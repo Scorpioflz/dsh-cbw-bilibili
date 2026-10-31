@@ -31,7 +31,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    const API = '/api/bili-duty'
+    const API = '/api/dsh-cbw-bili'
     /* ⚠️ 原来 jget/jpost 直接 .json()、从不看 res.ok ⇒ HTTP 500 的 {ok:false,error}
      *    会被调用方当成「已保存 / 成功」，绿色提示把故障盖掉。（2026-10-16 审查修） */
     const asJson = async (res) => {
@@ -263,6 +263,7 @@ function WatchTab() {
       const [favFolders, setFavFolders] = React.useState(null)   // 收藏夹列表（下拉用，null = 还没读）
       const [favId, setFavId] = React.useState(null)             // 选中的收藏夹 fid（字符串）
       const [modelList, setModelList] = React.useState(null)     // 可选模型（null = 还没读；[] = 读到了但没有）
+      const [personaEnabled, setPersonaEnabled] = React.useState(null)  // 人设开关
       const [persona, setPersona] = React.useState(null)   // 人设提示词草稿
       const [excl, setExcl] = React.useState(null)              // 排除词草稿（一行一个）
       const [cLen, setCLen] = React.useState(null)              // 评论长度 short/medium/long
@@ -326,6 +327,7 @@ function WatchTab() {
       const cfg = st?.config
       React.useEffect(() => {
         if (cfg && kws === null) setKws((cfg.keywords || []).join('\n'))
+        if (cfg && personaEnabled === null) setPersonaEnabled(cfg.personaEnabled === true)
         if (cfg && persona === null) setPersona(cfg.personaPrompt || '')
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
@@ -613,7 +615,7 @@ function WatchTab() {
         if (!list.length) clear.push('keywords')
         if (!list2.length) clear.push('excludeWords')
         if (!String(persona || '').trim().length) clear.push('personaPrompt')
-        await patch({ keywords: list, excludeWords: list2, commentLength: String(cLen || 'medium'), searchSort: String(fSort || 'pubdate'), personaPrompt: String(persona || '').trim(), ...(clear.length ? { clear } : {}) }, '关键词 / 排除词 / 人设')
+        await patch({ keywords: list, excludeWords: list2, commentLength: String(cLen || 'medium'), searchSort: String(fSort || 'pubdate'), personaEnabled: Boolean(personaEnabled), personaPrompt: String(persona || '').trim(), ...(clear.length ? { clear } : {}) }, '关键词 / 排除词 / 人设')
       }
 
       if (!cfg) {
@@ -625,7 +627,7 @@ function WatchTab() {
             : '读设置中…'),
           fails >= 6 ? h('div', { 'data-bd-note': '' },
             '可以先试：升级到最新版（dsh plugin --profile web add github:c1overzz/dsh-bili-scroll）→ 重启 dsh；还不行就把 ' +
-            '%USERPROFILE%\\.dsh\\bili-duty\\duty.log 的最后几十行发给作者。') : null)
+            '%USERPROFILE%\\.dsh\\dsh-cbw-bilibili\\duty.log 的最后几十行发给作者。') : null)
       }
 
       // 点了先变，别等网络回来（宿主写 DSH 设置那一步可能要几百毫秒）
@@ -733,7 +735,7 @@ function WatchTab() {
             '它每轮是另起一个 headless 会话跑的 —— 默认用你在会话里选的那个模型；'
             + '想让它固定用某个（比如更省 / 更强），就在这里选。改完下一轮生效，不用重启。'),
           h('div', { 'data-bd-note': '' },
-            '⚠️ 这里只列「这一轮那个 profile 里装了的」provider。2.1.0 起值班轮默认跑最小权限的 `bili-duty` profile，'
+            '⚠️ 这里只列「这一轮那个 profile 里装了的」provider。2.1.0 起值班轮默认跑最小权限的 `dsh-cbw-bili` profile，'
             + '里面只有 DeepSeek 两条路由；Antigravity 只在老的 `headless` profile 里，所以默认不出现。'),
           st.model && st.model.ignored ? h('div', { 'data-bd-msg': '', 'data-warn': '' },
             '你指定的 ' + st.model.ignored.provider + ' / ' + st.model.ignored.model
@@ -957,6 +959,12 @@ function WatchTab() {
             h('option', { value: 'click' }, '播放最多'),
             h('option', { value: 'dm' }, '弹幕最多'),
             h('option', { value: 'totalrank' }, '综合')),
+          h(ToggleRow, {
+            label: '人设提示词开关',
+            note: '默认关：人设插件已全局注入所有对话，不需要每次发送。开了才用下面那个人设提示词。',
+            on: Boolean(personaEnabled),
+            onChange: (v) => { setPersonaEnabled(v); patch({ personaEnabled: v }, '人设开关') },
+          }),
           h('div', { 'data-bd-label': '' }, '它按什么说话（人设提示词）—— 留空也能用：默认口语、短句、必带一个只有看了那条视频才说得出的细节'),
           h('textarea', {
             'data-bd-input': '', rows: 6,
@@ -1039,18 +1047,22 @@ function WatchTab() {
               st?.config?.hobbyLastRefresh
                 ? '上次分析：' + new Date(st.config.hobbyLastRefresh).toLocaleString('zh-CN')
                 : '还没分析过')),
-          (hobbyResult && hobbyResult.ok) ? h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-label': '' }, '画像结果'),
-            h('div', { 'data-bd-note': '' },
-              '用户：' + (hobbyResult.nickname || hobbyResult.uid) + '；'
-              + '收藏视频：' + hobbyResult.favorites?.totalVideos + ' 条；'
-              + '活跃度：' + hobbyResult.hobbyProfile?.activityLevel + '；'
-              + '兴趣迁移：' + hobbyResult.hobbyProfile?.interestShift),
-            hobbyResult.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
-              '偏好 UP 主：' + hobbyResult.hobbyProfile.preferredUploaders.join('、')) : null,
-            hobbyResult.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
-              '主要兴趣词：' + hobbyResult.hobbyProfile.primaryInterests.join('、')) : null,
-          ) : null,
+          (() => {
+            const hp = hobbyResult || st?.hobbyProfile
+            if (!hp || !hp.ok) return null
+            return h('div', { 'data-bd-sub': '' },
+              h('div', { 'data-bd-label': '' }, '画像结果' + (hobbyResult ? '' : '（上次分析）')),
+              h('div', { 'data-bd-note': '' },
+                '用户：' + (hp.nickname || hp.uid) + '；'
+                + '收藏视频：' + hp.favorites?.totalVideos + ' 条；'
+                + '活跃度：' + hp.hobbyProfile?.activityLevel + '；'
+                + '兴趣迁移：' + hp.hobbyProfile?.interestShift),
+              hp.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
+                '偏好 UP 主：' + hp.hobbyProfile.preferredUploaders.join('、')) : null,
+              hp.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
+                '主要兴趣词：' + hp.hobbyProfile.primaryInterests.join('、')) : null,
+            )
+          })(),
 
           // P2-A 兴趣学习+半衰期
           h(ToggleRow, {
@@ -1230,7 +1242,7 @@ function WatchTab() {
   //    ⇒ 只能**按当前会话动态注册/撤销**：
   //      · 往 composer 左边栏（`conversation.input.left`，每个会话都渲染的 list 槽）塞一个**隐藏探针**，
   //        它拿得到 `sessionId`；
-  //      · 探针问宿主 `GET /api/bili-duty/session-scope?session=…` —— 宿主查 workspaceRegistry，
+  //      · 探针问宿主 `GET /api/dsh-cbw-bili/session-scope?session=…` —— 宿主查 workspaceRegistry，
   //        回答这个会话是不是在「刷B站 设置里的 workspace」（默认 D:/hajimi）那个工作区里；
   //      · 是 ⇒ 注册「刷过的视频」；不是 ⇒ 立刻撤销（tab 跟着消失）。
   //    这样：hajimi 工作区里的会话有 tab，别的会话（比如 default-workspace）没有。

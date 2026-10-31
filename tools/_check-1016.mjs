@@ -63,7 +63,7 @@ ok(readme.includes('用那一份、跳过下载'), 'README 没写 uv.exe 手动�
 const verify = readFileSync(P + 'lib/verify.mjs', 'utf8')
 ok(idx.includes("from './lib/verify.mjs'"), 'index.js 没 import 复核模块')
 ok(idx.includes('const runVerify = async (why'), 'index.js 里没有 runVerify')
-ok(idx.includes("path === '/api/bili-duty/verify'"), '没有 /verify 路由')
+ok(idx.includes("path === '/api/dsh-cbw-bili/verify'"), '没有 /verify 路由')
 ok(idx.includes('90_000'), '跑完一轮后的自动复核没挂上')
 ok(idx.includes('rpid **') === false, '不该在这里出现报告文案')   // 文案在 verify.mjs 里
 ok(verify.includes('不等于没发出去'), 'verify.mjs 没守住"看不到不等于没发出去"的措辞')
