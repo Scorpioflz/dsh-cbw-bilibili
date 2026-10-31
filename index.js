@@ -1049,9 +1049,29 @@ function reportMeta() {
         freq[w] = (freq[w] || 0) + 1
       }
     }
-    return Object.entries(freq).filter(([, c]) => c >= 2)
-      .sort((a, b) => b[1] - a[1]).slice(0, topN)
-      .map(([word, count]) => ({ word, count }))
+    // ⭐ 停用词过滤：含"失"/"效"的词（B站失效视频标题碎片）、通用无意义词
+    const stopChars = /[失效]/
+    const stopWords = new Set([
+      '视频', '标题', '简介', '内容', '这个', '那个', '什么', '怎么', '为什么',
+      '可以', '不能', '应该', '觉得', '知道', '时候', '现在', '已经', '还是',
+      '但是', '如果', '虽然', '因为', '所以', '不过', '然后', '其实', '真的',
+      '大家', '我们', '你们', '他们', '自己', '一下', '一些', '这种', '那种',
+      '这样', '那样', '一下', '一样', '一直', '还有', '没有', '不是', '不要',
+      '的话', '到的', '我的', '你的', '他的', '她的', '它的', '这是', '那是',
+      '就是', '还是', '只有', '只是', '那是', '这些', '那些', '什么', '为何',
+      '如何', '如此', '此刻', '此处', '此地', '本次', '本视频', '本期',
+    ])
+    const entries = Object.entries(freq)
+      .filter(([word, c]) => c >= 2)
+      .filter(([word]) => !stopWords.has(word) && !stopChars.test(word))
+      .sort((a, b) => b[1] - a[1])
+    // ⭐ 子串抑制：短词是长词的子串且频率相近（>= 0.7）时抑制短词
+    const kept = []
+    for (const [word, count] of entries) {
+      const isSubstring = kept.some(([w, c]) => w.includes(word) && c >= count * 0.7)
+      if (!isSubstring) kept.push([word, count])
+    }
+    return kept.slice(0, topN).map(([word, count]) => ({ word, count }))
   }
 
   /** 画像注入 @dsh-cbw/memory（best-effort，失败静默） */
