@@ -279,6 +279,12 @@ function WatchTab() {
       const [dmWatch, setDmWatch] = React.useState(null)          // 私信双向开关
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
       const [mention, setMention] = React.useState(null)
+      const [masterUid, setMasterUid] = React.useState(null)      // P0-A 主人 UID
+      const [mentionNamesStr, setMentionNamesStr] = React.useState(null)  // P0-A @ 昵称清单（逗号分隔）
+      const [dmRecipStr, setDmRecipStr] = React.useState(null)    // P0-A 私信收件人 UID 清单（逗号分隔）
+      const [dutySid, setDutySid] = React.useState(null)          // P0-B 值班固定会话 ID
+      const [dmSid, setDmSid] = React.useState(null)              // P0-B 私信固定会话 ID
+      const [fixedSess, setFixedSess] = React.useState(null)      // P0-B 固定会话开关
       const [mProv, setMProv] = React.useState(null)      // 手填模型的 provider（只在读不到模型列表时露出来）
       const [mName, setMName] = React.useState(null)      // 手填模型的 model id
       const [login, setLogin] = React.useState(null)
@@ -322,6 +328,14 @@ function WatchTab() {
         if (cfg && excl === null) setExcl((cfg.excludeWords || []).join('\n'))
         if (cfg && cLen === null) setCLen(cfg.commentLength || 'medium')
         if (cfg && fSort === null) setFSort(cfg.searchSort || 'pubdate')
+        // P0-A 主人识别拆分：新字段优先、旧字段回退
+        if (cfg && masterUid === null) setMasterUid(cfg.masterUid ? String(cfg.masterUid) : (cfg.dmUid ? String(cfg.dmUid) : ''))
+        if (cfg && mentionNamesStr === null) setMentionNamesStr(Array.isArray(cfg.mentionNames) ? cfg.mentionNames.join(', ') : (cfg.mentionName || ''))
+        if (cfg && dmRecipStr === null) setDmRecipStr(Array.isArray(cfg.dmRecipientUids) ? cfg.dmRecipientUids.map(String).join(', ') : (cfg.dmUid ? String(cfg.dmUid) : ''))
+        // P0-B 固定会话
+        if (cfg && dutySid === null) setDutySid(cfg.dutySessionId || '')
+        if (cfg && dmSid === null) setDmSid(cfg.dmSessionId || '')
+        if (cfg && fixedSess === null) setFixedSess(Boolean(cfg.fixedSession))
       }, [cfg])
 
       // ⭐ 收藏夹列表：只读一次，读不到就空列表（别每 5 秒重拉）
@@ -813,6 +827,65 @@ function WatchTab() {
             'uid ' + st.ownerInfo.uid,
             st.ownerInfo.self ? '（就是现在登录的这个号）' : '',
             ' —— 想换人，改上面那个「要 @ 谁」就行') : null,
+
+          // P0-A 主人识别拆分：主人 UID / @ 昵称清单 / 私信收件人清单
+          h('div', { 'data-bd-sep': '' }),
+          h('div', { 'data-bd-h': '' }, '主人与收件人（拆分版）'),
+          h('div', { 'data-bd-note': '' }, '上面「发给谁 / @ 谁」是旧版单字段；下面三个是新版拆分字段，填了优先用新版。朋友也能加进收件人清单，不必是主人。'),
+          h('div', { 'data-bd-label': '' }, '主人 UID'),
+          h('input', {
+            'data-bd-input': '', value: masterUid ?? '',
+            placeholder: '主人的 B站 UID（数字）；留空则回退到旧 dmUid',
+            onChange: (e) => setMasterUid(e.target.value),
+            onBlur: () => { const v = String(masterUid || '').trim(); setMasterUid(v); patch({ masterUid: v ? Number(v) : null }, '主人 UID') },
+          }),
+          h('div', { 'data-bd-label': '' }, '@ 昵称清单（逗号分隔）'),
+          h('input', {
+            'data-bd-input': '', value: mentionNamesStr ?? '',
+            placeholder: '评论里要 @ 的昵称，可多个：张三, 李四',
+            onChange: (e) => setMentionNamesStr(e.target.value),
+            onBlur: () => { const arr = String(mentionNamesStr || '').split(',').map(s => s.trim()).filter(Boolean); setMentionNamesStr(arr.join(', ')); patch({ mentionNames: arr }, '@ 昵称清单') },
+          }),
+          h('div', { 'data-bd-label': '' }, '私信收件人 UID 清单（逗号分隔）'),
+          h('input', {
+            'data-bd-input': '', value: dmRecipStr ?? '',
+            placeholder: '私信发给谁的 UID，可多个：12345, 67890',
+            onChange: (e) => setDmRecipStr(e.target.value),
+            onBlur: () => { const arr = String(dmRecipStr || '').split(',').map(s => s.trim()).filter(Boolean).map(Number); setDmRecipStr(arr.map(String).join(', ')); patch({ dmRecipientUids: arr }, '私信收件人清单') },
+          }),
+          h('div', { 'data-bd-note': '' }, '旧字段 mentionName / dmUid 仍保留兼容；新字段留空时自动回退到旧字段。'),
+
+          // P0-B 固定会话：值班 + 私信复用同一会话，跨轮保留上下文
+          h('div', { 'data-bd-sep': '' }),
+          h(ToggleRow, {
+            label: '固定会话（跨轮保留上下文）',
+            note: '开了以后值班轮和私信回复都复用同一个 DSH 会话 ID，不每轮新建。⭐ 需要先用 dsh CLI 建一个会话拿到 ID 填到下面。',
+            on: Boolean(fixedSess),
+            onChange: (v) => { setFixedSess(v); patch({ fixedSession: v }, '固定会话') },
+          }),
+          fixedSess ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '值班会话 ID'),
+                h('div', { 'data-bd-note': '' }, 'runDuty 用 --session-id 传给 dsh CLI；留空则值班不固定')),
+              h('input', {
+                'data-bd-input': '', value: dutySid ?? '',
+                placeholder: 'dsh 会话 ID（uuid）',
+                onChange: (e) => setDutySid(e.target.value),
+                onBlur: () => { const v = String(dutySid || '').trim(); setDutySid(v); patch({ dutySessionId: v }, '值班会话 ID') },
+              })),
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '私信会话 ID'),
+                h('div', { 'data-bd-note': '' }, '私信回复用这个会话；留空则私信不固定')),
+              h('input', {
+                'data-bd-input': '', value: dmSid ?? '',
+                placeholder: 'dsh 会话 ID（uuid）',
+                onChange: (e) => setDmSid(e.target.value),
+                onBlur: () => { const v = String(dmSid || '').trim(); setDmSid(v); patch({ dmSessionId: v }, '私信会话 ID') },
+              }))) : null,
+
+          h('div', { 'data-bd-sep': '' }),
           h(ToggleRow, {
             label: '本地转写没字幕的视频',
             note: '默认关；开了以后，没字幕的视频会在本机转写一遍（不花 API 钱）',
