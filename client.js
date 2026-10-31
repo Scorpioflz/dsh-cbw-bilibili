@@ -285,6 +285,10 @@ function WatchTab() {
       const [dutySid, setDutySid] = React.useState(null)          // P0-B 值班固定会话 ID
       const [dmSid, setDmSid] = React.useState(null)              // P0-B 私信固定会话 ID
       const [fixedSess, setFixedSess] = React.useState(null)      // P0-B 固定会话开关
+      const [hobbyRefresh, setHobbyRefresh] = React.useState(null)  // P1 画像刷新周期（天）
+      const [hobbyMaxVids, setHobbyMaxVids] = React.useState(null)  // P1 单次分析最多视频数
+      const [hobbyBusy, setHobbyBusy] = React.useState(false)       // P1 分析中
+      const [hobbyResult, setHobbyResult] = React.useState(null)    // P1 分析结果
       const [mProv, setMProv] = React.useState(null)      // 手填模型的 provider（只在读不到模型列表时露出来）
       const [mName, setMName] = React.useState(null)      // 手填模型的 model id
       const [login, setLogin] = React.useState(null)
@@ -336,6 +340,9 @@ function WatchTab() {
         if (cfg && dutySid === null) setDutySid(cfg.dutySessionId || '')
         if (cfg && dmSid === null) setDmSid(cfg.dmSessionId || '')
         if (cfg && fixedSess === null) setFixedSess(Boolean(cfg.fixedSession))
+        // P1 爱好分析
+        if (cfg && hobbyRefresh === null) setHobbyRefresh(Number(cfg.hobbyRefreshDays) || 30)
+        if (cfg && hobbyMaxVids === null) setHobbyMaxVids(Number(cfg.hobbyMaxVideos) || 500)
       }, [cfg])
 
       // ⭐ 收藏夹列表：只读一次，读不到就空列表（别每 5 秒重拉）
@@ -964,6 +971,61 @@ function WatchTab() {
 
           h('div', { 'data-bd-row': '' },
             msg ? h('div', { 'data-bd-msg': '', 'data-good': msgTone === 'good' ? '' : undefined, 'data-warn': msgTone === 'warn' ? '' : undefined }, msg) : null)),
+
+          // P1 爱好分析
+          h('div', { 'data-bd-sep': '' }),
+          h('div', { 'data-bd-h': '' }, '主人爱好画像'),
+          h('div', { 'data-bd-note': '' }, '从主人公开收藏夹分析爱好（UP 主偏好、标题关键词、时间分布），写入 @dsh-cbw/memory 作为长期事实。用值班号凭证访问，不需要主人号登录。'),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '画像刷新周期（天）'),
+              h('div', { 'data-bd-note': '' }, '超过这个天数没分析过，值班时会自动刷新')),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 365,
+              value: hobbyRefresh ?? 30,
+              onChange: (e) => setHobbyRefresh(e.target.value),
+              onBlur: () => { const n = Math.max(1, Math.min(Number(hobbyRefresh) || 30, 365)); setHobbyRefresh(n); patch({ hobbyRefreshDays: n }, '画像刷新周期') },
+            })),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '单次分析最多视频数'),
+              h('div', { 'data-bd-note': '' }, '从收藏夹取多少条视频做分析（10–5000）')),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 10, max: 5000,
+              value: hobbyMaxVids ?? 500,
+              onChange: (e) => setHobbyMaxVids(e.target.value),
+              onBlur: () => { const n = Math.max(10, Math.min(Number(hobbyMaxVids) || 500, 5000)); setHobbyMaxVids(n); patch({ hobbyMaxVideos: n }, '分析视频上限') },
+            })),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '', disabled: hobbyBusy,
+              onClick: async () => {
+                setHobbyBusy(true); setHobbyResult(null)
+                try {
+                  const r = await jpost('/hobby-analyze', {})
+                  setHobbyResult(r)
+                  if (r?.ok) say('爱好画像分析完成' + (r.memoryInjected?.ok ? '，已写入记忆' : ''), 'good')
+                  else say('爱好分析失败：' + (r?.error || '未知'), 'warn')
+                } catch (e) { say('爱好分析出错：' + String(e?.message ?? e), 'warn') }
+                finally { setHobbyBusy(false) }
+              },
+            }, hobbyBusy ? '分析中…' : '现在分析爱好画像'),
+            h('div', { 'data-bd-note': '' },
+              st?.config?.hobbyLastRefresh
+                ? '上次分析：' + new Date(st.config.hobbyLastRefresh).toLocaleString('zh-CN')
+                : '还没分析过')),
+          (hobbyResult && hobbyResult.ok) ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '画像结果'),
+            h('div', { 'data-bd-note': '' },
+              '用户：' + (hobbyResult.nickname || hobbyResult.uid) + '；'
+              + '收藏视频：' + hobbyResult.favorites?.totalVideos + ' 条；'
+              + '活跃度：' + hobbyResult.hobbyProfile?.activityLevel + '；'
+              + '兴趣迁移：' + hobbyResult.hobbyProfile?.interestShift),
+            hobbyResult.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
+              '偏好 UP 主：' + hobbyResult.hobbyProfile.preferredUploaders.join('、')) : null,
+            hobbyResult.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
+              '主要兴趣词：' + hobbyResult.hobbyProfile.primaryInterests.join('、')) : null,
+          ) : null,
 
         /* ── 环境与账号 ── */
         /* ── 它刷过的视频 ── */

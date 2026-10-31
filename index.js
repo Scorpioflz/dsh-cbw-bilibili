@@ -293,6 +293,8 @@ function reportMeta() {
     manualMax: 3, manualCooldownMin: 10, searchSort: 'pubdate', searchPages: 2, fetchPerRound: 8, excludeWords: [], commentLength: 'medium',
     modelProvider: '', modelName: '', runTimeoutMinutes: 20,
     fixedSession: true, dutySessionId: 'bili-duty-fixed', dmSessionId: 'bili-dm-fixed', webapiBase: '', webapiKey: '',
+    // P1 爱好分析
+    hobbyRefreshDays: 30, hobbyMaxVideos: 500, hobbyLastRefresh: 0,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -353,6 +355,10 @@ function reportMeta() {
     if ('dmSessionId' in p) p.dmSessionId = String(p.dmSessionId || '').trim().slice(0, 120) || 'bili-dm-fixed'
     if ('webapiBase' in p) p.webapiBase = String(p.webapiBase || '').trim().slice(0, 300)
     if ('webapiKey' in p) p.webapiKey = String(p.webapiKey || '').trim().slice(0, 300)
+    // P1 爱好分析
+    if ('hobbyRefreshDays' in p) p.hobbyRefreshDays = Math.max(1, Math.min(Number(p.hobbyRefreshDays) || 30, 365))
+    if ('hobbyMaxVideos' in p) p.hobbyMaxVideos = Math.max(10, Math.min(Number(p.hobbyMaxVideos) || 500, 5000))
+    if ('hobbyLastRefresh' in p) p.hobbyLastRefresh = Math.max(0, Number(p.hobbyLastRefresh) || 0)
     return p
   }
 
@@ -910,6 +916,255 @@ function reportMeta() {
         host = (await persistCfg(args.patch)).host
       }
       return { ok: true, config: cfg, windows: WINDOWS, home: stateDir, venvReady: venvReadyNow(), host }
+    },
+  })
+
+  /* ─────────────── P1 爱好分析：3 个宿主工具 ───────────────
+   *  数据源：B站公开收藏夹 + 用户信息（用值班号凭证访问主人公开数据，不需要主人号登录）
+   *  MCP 工具：bili_favorite_lists / bili_favorite_content / bili_user_info / bili_video_info
+   *  画像注入：写入 @dsh-cbw/memory（HTTP POST localhost:3080/dsh-cbw-memory/add），失败静默跳过
+   */
+
+  /** 解析 uid：参数 > 0 用参数；否则用昵称查；再否则回退 masterUid / dmUid */
+  const resolveTargetUid = async (uid, nickname) => {
+    const u = Number(uid) || 0
+    if (u > 0) return u
+    const name = String(nickname || '').trim()
+    if (name) return await resolveUid(stateDir, name, log)
+    const master = Number(cfg.masterUid) || 0
+    if (master > 0) return master
+    return Number(cfg.dmUid) || 0
+  }
+
+  /** 聚合统计：从收藏夹视频列表里算 topUploaders / timeDistribution / totalVideos */
+  const aggregateFavorites = (allVideos, maxVideos) => {
+    const total = allVideos.length
+    // UP 主频次
+    const uploaderMap = {}
+    for (const v of allVideos) {
+      const name = String(v.author || '').trim()
+      if (name) uploaderMap[name] = (uploaderMap[name] || 0) + 1
+    }
+    const topUploaders = Object.entries(uploaderMap)
+      .sort((a, b) => b[1] - a[1]).slice(0, 10)
+      .map(([name, count]) => ({ name, count, ratio: Math.round((count / total) * 100) / 100 }))
+
+    // 时间分布（按月）
+    const monthMap = {}
+    for (const v of allVideos) {
+      const ft = Number(v.fav_time) || 0
+      if (ft > 0) {
+        const d = new Date(ft * 1000)
+        const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        monthMap[month] = (monthMap[month] || 0) + 1
+      }
+    }
+    const timeDistribution = Object.entries(monthMap)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, count]) => ({ month, count }))
+
+    return { totalVideos: total, topUploaders, timeDistribution }
+  }
+
+  /** 从视频标题里提取高频词（简单分词：CJK 2-4 字 + 英文单词） */
+  const extractTitleKeywords = (videos, topN = 20) => {
+    const freq = {}
+    for (const v of videos) {
+      const title = String(v.title || '')
+      // CJK 2-4 字词
+      for (let i = 0; i < title.length - 1; i++) {
+        for (let len = 2; len <= 4 && i + len <= title.length; len++) {
+          const word = title.slice(i, i + len)
+          if (/^[\u4e00-\u9fff]+$/.test(word)) {
+            freq[word] = (freq[word] || 0) + 1
+          }
+        }
+      }
+      // 英文单词
+      for (const w of title.toLowerCase().match(/[a-z]{3,9}/g) || []) {
+        freq[w] = (freq[w] || 0) + 1
+      }
+    }
+    return Object.entries(freq).filter(([, c]) => c >= 2)
+      .sort((a, b) => b[1] - a[1]).slice(0, topN)
+      .map(([word, count]) => ({ word, count }))
+  }
+
+  /** 画像注入 @dsh-cbw/memory（best-effort，失败静默） */
+  const injectHobbyToMemory = async (hobbyProfile, uid) => {
+    try {
+      const memoryUrl = 'http://localhost:3080/dsh-cbw-memory/add'
+      const content = `主人B站爱好画像（uid=${uid}）：`
+        + `主要兴趣=${hobbyProfile.primaryInterests.join('、')}；`
+        + `偏好UP主=${hobbyProfile.preferredUploaders.join('、')}；`
+        + `活跃度=${hobbyProfile.activityLevel}；`
+        + `兴趣迁移=${hobbyProfile.interestShift}；`
+        + `标签=${hobbyProfile.tags.join('、')}`
+      const r = await fetch(memoryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          importance: 'critical',
+          tags: ['bilibili', 'hobby', 'user_profile'],
+          source: 'user_explicit',
+        }),
+      })
+      if (r.ok) return { ok: true }
+      return { ok: false, error: `记忆插件返回 ${r.status}` }
+    } catch (e) {
+      return { ok: false, error: String(e?.message ?? e) }
+    }
+  }
+
+  /** P1 爱好分析核心逻辑（工具和 HTTP 路由共用） */
+  const doHobbyAnalyze = async (uid, nickname, shouldInject = true) => {
+    if (!hasCredential()) return { ok: false, error: '还没扫码登录 B站' }
+    const targetUid = await resolveTargetUid(uid, nickname)
+    if (targetUid <= 0) return { ok: false, error: '查不到目标用户 UID（填 uid 或 nickname，或先在设置里配 masterUid）' }
+    const limit = Math.max(10, Math.min(Number(cfg.hobbyMaxVideos) || 500, 5000))
+
+    const favLists = await call('bili_favorite_lists', { uid: targetUid })
+    const folders = (favLists?.lists || []).filter((f) => Number(f.media_count) > 0)
+    const allVideos = []
+    let collected = 0
+    const folderStats = []
+    for (const f of folders) {
+      if (collected >= limit) break
+      const pageLimit = Math.ceil(Math.min(Number(f.media_count) || 0, limit - collected) / 20)
+      const medias = []
+      for (let page = 1; page <= pageLimit; page++) {
+        if (collected >= limit) break
+        const c = await call('bili_favorite_content', { media_id: Number(f.id), page })
+        const items = c?.medias || []
+        medias.push(...items)
+        collected += items.length
+        if (!c?.has_more) break
+      }
+      folderStats.push({ id: f.id, title: f.title, media_count: f.media_count, collected: medias.length })
+      allVideos.push(...medias)
+    }
+
+    let userInfo = {}
+    try { userInfo = await call('bili_user_info', { uid: targetUid }) } catch { /* 拿不到也不挡 */ }
+
+    const agg = aggregateFavorites(allVideos, limit)
+    const titleKeywords = extractTitleKeywords(allVideos, 20)
+
+    const now = Date.now()
+    const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000
+    let recent = 0, older = 0
+    for (const v of allVideos) {
+      const ft = (Number(v.fav_time) || 0) * 1000
+      if (ft >= threeMonthsAgo) recent++
+      else if (ft > 0) older++
+    }
+    const interestShift = recent > older * 2 ? 'new' : recent > older * 0.5 ? 'shifting' : 'stable'
+    const activityLevel = agg.totalVideos > 200 ? 'high' : agg.totalVideos > 50 ? 'medium' : 'low'
+
+    const hobbyProfile = {
+      primaryInterests: titleKeywords.slice(0, 5).map((k) => k.word),
+      secondaryInterests: titleKeywords.slice(5, 10).map((k) => k.word),
+      preferredUploaders: agg.topUploaders.slice(0, 5).map((u) => u.name),
+      tags: titleKeywords.slice(0, 15).map((k) => k.word),
+      activityLevel,
+      interestShift,
+    }
+
+    const result = {
+      ok: true,
+      uid: targetUid,
+      nickname: userInfo?.name || '',
+      favorites: {
+        folders: folderStats,
+        totalVideos: agg.totalVideos,
+        topUploaders: agg.topUploaders,
+        timeDistribution: agg.timeDistribution,
+        titleKeywords,
+      },
+      following: { count: Number(userInfo?.following) || 0 },
+      hobbyProfile,
+      analyzedAt: new Date().toISOString(),
+    }
+
+    if (shouldInject) {
+      result.memoryInjected = await injectHobbyToMemory(hobbyProfile, targetUid)
+    }
+
+    try { await persistCfg({ hobbyLastRefresh: now }) } catch { /* 不挡 */ }
+
+    return result
+  }
+
+  tool({
+    name: 'bili_user_favorites',
+    description: '列 B站 用户的公开收藏夹 + 每个夹里的视频。用值班号凭证访问，不需要主人号登录。\n'
+      + '不填 uid/nickname 时用设置里的主人 UID。',
+    parameters: {
+      uid: { type: 'number', description: '用户 UID（不填则用 nickname 或主人 UID）' },
+      nickname: { type: 'string', description: '用户昵称（uid 优先）' },
+      maxVideos: { type: 'number', description: '最多取多少条视频（默认跟设置 hobbyMaxVideos）' },
+    },
+    async execute(args) {
+      if (!hasCredential()) return { ok: false, error: '还没扫码登录 B站' }
+      const targetUid = await resolveTargetUid(args.uid, args.nickname)
+      if (targetUid <= 0) return { ok: false, error: '查不到目标用户 UID（填 uid 或 nickname，或先在设置里配 masterUid）' }
+      const limit = Math.max(10, Math.min(Number(args.maxVideos) || Number(cfg.hobbyMaxVideos) || 500, 5000))
+
+      const favLists = await call('bili_favorite_lists', { uid: targetUid })
+      const folders = (favLists?.lists || []).filter((f) => Number(f.media_count) > 0)
+      const result = { ok: true, uid: targetUid, folders: [], totalVideos: 0 }
+
+      let collected = 0
+      for (const f of folders) {
+        if (collected >= limit) break
+        const pageLimit = Math.ceil(Math.min(Number(f.media_count) || 0, limit - collected) / 20)
+        const medias = []
+        for (let page = 1; page <= pageLimit; page++) {
+          if (collected >= limit) break
+          const c = await call('bili_favorite_content', { media_id: Number(f.id), page })
+          const items = c?.medias || []
+          medias.push(...items)
+          collected += items.length
+          if (!c?.has_more) break
+        }
+        result.folders.push({ id: f.id, title: f.title, media_count: f.media_count, videos: medias })
+        result.totalVideos += medias.length
+      }
+      return result
+    },
+  })
+
+  tool({
+    name: 'bili_user_profile',
+    description: '获取 B站 用户的公开信息（昵称、签名、等级、粉丝数、关注数等）。\n'
+      + '不填 uid/nickname 时用设置里的主人 UID。',
+    parameters: {
+      uid: { type: 'number', description: '用户 UID（不填则用 nickname 或主人 UID）' },
+      nickname: { type: 'string', description: '用户昵称（uid 优先）' },
+    },
+    async execute(args) {
+      if (!hasCredential()) return { ok: false, error: '还没扫码登录 B站' }
+      const targetUid = await resolveTargetUid(args.uid, args.nickname)
+      if (targetUid <= 0) return { ok: false, error: '查不到目标用户 UID' }
+
+      const info = await call('bili_user_info', { uid: targetUid })
+      return { ok: true, uid: targetUid, ...(typeof info === 'object' ? info : { raw: info }) }
+    },
+  })
+
+  tool({
+    name: 'bili_analyze_hobby',
+    description: '综合分析 B站 用户的爱好画像：从公开收藏夹聚合统计（UP 主偏好、时间分布、标题关键词），\n'
+      + '输出结构化画像 JSON，并写入 @dsh-cbw/memory 作为长期事实（best-effort）。\n'
+      + '不填 uid/nickname 时用设置里的主人 UID。分析后自动更新 hobbyLastRefresh。',
+    parameters: {
+      uid: { type: 'number', description: '用户 UID（不填则用 nickname 或主人 UID）' },
+      nickname: { type: 'string', description: '用户昵称（uid 优先）' },
+      injectMemory: { type: 'boolean', description: '是否写入 @dsh-cbw/memory（默认 true）' },
+    },
+    async execute(args) {
+      return doHobbyAnalyze(args.uid, args.nickname, args.injectMemory !== false)
     },
   })
 
@@ -3055,6 +3310,12 @@ function reportMeta() {
       return sendJson(res, 200, { ok: true, ...runDuty('manual') })
     }
 
+    // P1 爱好分析（设置页触发）
+    if (req.method === 'POST' && path === '/api/bili-duty/hobby-analyze') {
+      const body = await readBody(req)
+      return sendJson(res, 200, await doHobbyAnalyze(body.uid, body.nickname, body.injectMemory !== false))
+    }
+
     // 建 venv + 装依赖（**不等它**：几分钟的活，进度写 install.log）
     if (req.method === 'POST' && path === '/api/bili-duty/install') {
       return sendJson(res, 200, runInstall())
@@ -3232,7 +3493,7 @@ function reportMeta() {
       // ⭐⭐ 2.0.4（第三方体检第 5 条）：脱敏改成**按字段白名单遮** ——
       //    以前只遮 dmUid，人设全文 / 昵称 / 工作区路径全在，而"复制诊断"是会被贴到群里的 ✗
       const masked = (() => {
-        const SENSITIVE = ['personaPrompt', 'mentionName', 'mentionNames', 'workspace', 'dshBin', 'dmUid', 'dmRecipientUids', 'dmOwnerUid', 'masterUid', 'webapiKey', 'keywords']
+        const SENSITIVE = ['personaPrompt', 'mentionName', 'mentionNames', 'workspace', 'dshBin', 'dmUid', 'dmRecipientUids', 'dmOwnerUid', 'masterUid', 'webapiKey', 'keywords', 'hobbyLastRefresh']
         const c = { ...cfg }
         for (const k of SENSITIVE) {
           const v = c[k]
