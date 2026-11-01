@@ -20,7 +20,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/Scorpioflz/dsh-cbw-bilibili",
-            "commit": "pending"
+            "commit": "d710fa2"
           },
           "engines": { "dsh": ">=0.1.7-rc.1" }
         },
