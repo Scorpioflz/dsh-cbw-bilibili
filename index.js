@@ -305,6 +305,7 @@ function reportMeta() {
     fixedSession: true, dutySessionId: 'dsh-cbw-bili-fixed', dmSessionId: 'dsh-cbw-bili-dm-fixed', webapiBase: '', webapiKey: '',
     // P1 爱好分析
     hobbyRefreshDays: 30, hobbyMaxVideos: 500, hobbyLastRefresh: 0,
+    hobbyTimeHalfLifeDays: 180, hobbyDeepAnalyze: true, hobbyDeepSampleSize: 50,
     // P2 兴趣学习+半衰期
     interestLearnEnabled: true, interestHalfLifeDays: 14,
     // P2 评论三层闸门
@@ -377,6 +378,9 @@ function reportMeta() {
     if ('hobbyRefreshDays' in p) p.hobbyRefreshDays = Math.max(1, Math.min(Number(p.hobbyRefreshDays) || 30, 365))
     if ('hobbyMaxVideos' in p) p.hobbyMaxVideos = Math.max(10, Math.min(Number(p.hobbyMaxVideos) || 500, 5000))
     if ('hobbyLastRefresh' in p) p.hobbyLastRefresh = Math.max(0, Number(p.hobbyLastRefresh) || 0)
+    if ('hobbyTimeHalfLifeDays' in p) p.hobbyTimeHalfLifeDays = Math.max(30, Math.min(Number(p.hobbyTimeHalfLifeDays) || 180, 1095))
+    if ('hobbyDeepAnalyze' in p) p.hobbyDeepAnalyze = Boolean(p.hobbyDeepAnalyze)
+    if ('hobbyDeepSampleSize' in p) p.hobbyDeepSampleSize = Math.max(10, Math.min(Number(p.hobbyDeepSampleSize) || 50, 200))
     // P2 兴趣学习
     if ('interestLearnEnabled' in p) p.interestLearnEnabled = Boolean(p.interestLearnEnabled)
     if ('interestHalfLifeDays' in p) p.interestHalfLifeDays = Math.max(1, Math.min(Number(p.interestHalfLifeDays) || 14, 90))
@@ -1031,23 +1035,33 @@ function reportMeta() {
     return { totalVideos: total, topUploaders, timeDistribution }
   }
 
-  /** 从视频标题里提取高频词（简单分词：CJK 2-4 字 + 英文单词） */
-  const extractTitleKeywords = (videos, topN = 20) => {
+  /** ⭐ 时间衰减权重：越接近现在越高，半衰期模型 */
+  const FALLBACK_FAV_TIME = 1593561600  // 2020.7.1 Unix timestamp（秒），fav_time 缺失时统一用此值
+  const timeWeight = (favTimeSec, halfLifeDays) => {
+    const ft = Number(favTimeSec) || 0
+    const ts = ft > 0 ? ft : FALLBACK_FAV_TIME
+    const daysAgo = (Date.now() / 1000 - ts) / 86400
+    return Math.pow(0.5, Math.max(0, daysAgo) / Math.max(1, halfLifeDays))
+  }
+
+  /** 从视频标题里提取高频词（简单分词：CJK 2-4 字 + 英文单词），加时间衰减权重 */
+  const extractTitleKeywords = (videos, topN = 20, halfLifeDays = 180) => {
     const freq = {}
     for (const v of videos) {
+      const tw = timeWeight(v.fav_time, halfLifeDays)
       const title = String(v.title || '')
       // CJK 2-4 字词
       for (let i = 0; i < title.length - 1; i++) {
         for (let len = 2; len <= 4 && i + len <= title.length; len++) {
           const word = title.slice(i, i + len)
           if (/^[\u4e00-\u9fff]+$/.test(word)) {
-            freq[word] = (freq[word] || 0) + 1
+            freq[word] = (freq[word] || 0) + tw
           }
         }
       }
       // 英文单词
       for (const w of title.toLowerCase().match(/[a-z]{3,9}/g) || []) {
-        freq[w] = (freq[w] || 0) + 1
+        freq[w] = (freq[w] || 0) + tw
       }
     }
     // ⭐ 停用词过滤：含"失"/"效"的词（B站失效视频标题碎片）、通用无意义词
@@ -1063,10 +1077,76 @@ function reportMeta() {
       '如何', '如此', '此刻', '此处', '此地', '本次', '本视频', '本期',
     ])
     const entries = Object.entries(freq)
-      .filter(([word, c]) => c >= 2)
+      .filter(([word, c]) => c >= 1)
       .filter(([word]) => !stopWords.has(word) && !stopChars.test(word))
       .sort((a, b) => b[1] - a[1])
     // ⭐ 子串抑制：短词是长词的子串且频率相近（>= 0.7）时抑制短词
+    const kept = []
+    for (const [word, count] of entries) {
+      const isSubstring = kept.some(([w, c]) => w.includes(word) && c >= count * 0.7)
+      if (!isSubstring) kept.push([word, count])
+    }
+    return kept.slice(0, topN).map(([word, count]) => ({ word, count }))
+  }
+
+  /** ⭐ 深度采集：对最近收藏视频调 bili_video_info 获取 tags（官方分类词，高权重） */
+  const deepCollectTags = async (videos, sampleSize, halfLifeDays) => {
+    const sorted = [...videos].sort((a, b) => (Number(b.fav_time) || 0) - (Number(a.fav_time) || 0))
+    const sample = sorted.slice(0, sampleSize)
+    const tagFreq = {}
+    const batchSize = 10
+    for (let i = 0; i < sample.length; i += batchSize) {
+      const batch = sample.slice(i, i + batchSize)
+      const results = await Promise.allSettled(
+        batch.map((v) => call('bili_video_info', { bvid: v.bvid }).then((r) => ({ v, r })))
+      )
+      for (const res of results) {
+        if (res.status !== 'fulfilled' || !res.value?.r) continue
+        const tw = timeWeight(res.value.v.fav_time, halfLifeDays)
+        for (const tag of (res.value.r.tags || [])) {
+          const t = String(tag).trim()
+          if (t.length >= 2) tagFreq[t] = (tagFreq[t] || 0) + tw * 3  // tag 权重 ×3
+        }
+      }
+    }
+    return Object.entries(tagFreq).sort((a, b) => b[1] - a[1]).map(([word, count]) => ({ word, count }))
+  }
+
+  /** ⭐ 深度采集：对 top UP 主调 bili_user_info 获取签名，提取关键词（辅助信号） */
+  const deepCollectUploaderSigns = async (topUploaders, totalVideos, halfLifeDays) => {
+    const top = topUploaders.slice(0, 10)
+    const infos = await Promise.allSettled(
+      top.map((u) => call('bili_user_info', { uid: u.uid }).then((r) => ({ u, r })))
+    )
+    const signFreq = {}
+    const stopChars = /[失效]/
+    for (const res of infos) {
+      if (res.status !== 'fulfilled' || !res.value?.r) continue
+      const sign = String(res.value.r.sign || '')
+      const uw = (res.value.u.count || 0) / Math.max(1, totalVideos)
+      for (let i = 0; i < sign.length - 1; i++) {
+        for (let len = 2; len <= 4 && i + len <= sign.length; len++) {
+          const word = sign.slice(i, i + len)
+          if (/^[\u4e00-\u9fff]+$/.test(word) && !stopChars.test(word)) {
+            signFreq[word] = (signFreq[word] || 0) + uw * 0.5  // 签名词权重 ×0.5
+          }
+        }
+      }
+    }
+    return Object.entries(signFreq).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).map(([word, count]) => ({ word, count }))
+  }
+
+  /** ⭐ 合并多来源关键词：tag（高权重）+ 标题词（中权重）+ UP 主签名词（低权重），去重 + 子串抑制 */
+  const mergeInterests = (tagKws, titleKws, signKws, topN = 20) => {
+    const freq = {}
+    for (const k of tagKws) freq[k.word] = (freq[k.word] || 0) + k.count
+    for (const k of titleKws) freq[k.word] = (freq[k.word] || 0) + k.count
+    for (const k of signKws) freq[k.word] = (freq[k.word] || 0) + k.count
+    const stopChars = /[失效]/
+    const stopWords = new Set(['视频', '标题', '简介', '内容', '这个', '那个', '什么', '怎么', '可以', '不能', '应该', '觉得', '知道', '时候', '现在', '已经', '还是', '但是', '如果', '因为', '所以', '然后', '其实', '大家', '我们', '自己', '一下', '一些', '这种', '这样', '一样', '一直', '还有', '没有', '不是', '不要', '的话', '我的', '你的', '他的', '这是', '就是', '只有', '只是', '这些', '那些', '如何', '为何', '本次'])
+    const entries = Object.entries(freq)
+      .filter(([word]) => !stopWords.has(word) && !stopChars.test(word) && word.length >= 2)
+      .sort((a, b) => b[1] - a[1])
     const kept = []
     for (const [word, count] of entries) {
       const isSubstring = kept.some(([w, c]) => w.includes(word) && c >= count * 0.7)
@@ -1139,7 +1219,18 @@ function reportMeta() {
     try { userInfo = await call('bili_user_info', { uid: targetUid }) } catch { /* 拿不到也不挡 */ }
 
     const agg = aggregateFavorites(allVideos, limit)
-    const titleKeywords = extractTitleKeywords(allVideos, 20)
+    const halfLifeDays = Number(cfg.hobbyTimeHalfLifeDays) || 180
+    const titleKeywords = extractTitleKeywords(allVideos, 20, halfLifeDays)
+
+    // ⭐ 深度采集：视频 Tag（高权重）+ UP 主签名词（低权重）
+    let tagKeywords = []
+    let signKeywords = []
+    if (cfg.hobbyDeepAnalyze !== false) {
+      const sampleSize = Math.max(10, Math.min(Number(cfg.hobbyDeepSampleSize) || 50, 200))
+      try { tagKeywords = await deepCollectTags(allVideos, sampleSize, halfLifeDays) } catch { /* 拿不到不挡 */ }
+      try { signKeywords = await deepCollectUploaderSigns(agg.topUploaders, agg.totalVideos, halfLifeDays) } catch { /* 拿不到不挡 */ }
+    }
+    const mergedInterests = mergeInterests(tagKeywords, titleKeywords, signKeywords, 20)
 
     const now = Date.now()
     const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000
@@ -1153,10 +1244,11 @@ function reportMeta() {
     const activityLevel = agg.totalVideos > 200 ? 'high' : agg.totalVideos > 50 ? 'medium' : 'low'
 
     const hobbyProfile = {
-      primaryInterests: titleKeywords.slice(0, 5).map((k) => k.word),
-      secondaryInterests: titleKeywords.slice(5, 10).map((k) => k.word),
+      primaryInterests: mergedInterests.slice(0, 5).map((k) => k.word),
+      secondaryInterests: mergedInterests.slice(5, 10).map((k) => k.word),
+      tagInterests: tagKeywords.slice(0, 10).map((k) => k.word),
       preferredUploaders: agg.topUploaders.slice(0, 5).map((u) => u.name),
-      tags: titleKeywords.slice(0, 15).map((k) => k.word),
+      tags: mergedInterests.slice(0, 15).map((k) => k.word),
       activityLevel,
       interestShift,
     }
@@ -1171,6 +1263,8 @@ function reportMeta() {
         topUploaders: agg.topUploaders,
         timeDistribution: agg.timeDistribution,
         titleKeywords,
+        tagKeywords,
+        signKeywords,
       },
       following: { count: Number(userInfo?.following) || 0 },
       hobbyProfile,

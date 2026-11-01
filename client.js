@@ -1059,6 +1059,8 @@ function WatchTab() {
                 + '兴趣迁移：' + hp.hobbyProfile?.interestShift),
               hp.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
                 '偏好 UP 主：' + hp.hobbyProfile.preferredUploaders.join('、')) : null,
+              hp.hobbyProfile?.tagInterests?.length ? h('div', { 'data-bd-note': '' },
+                '视频标签：' + hp.hobbyProfile.tagInterests.join('、')) : null,
               hp.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
                 '主要兴趣词：' + hp.hobbyProfile.primaryInterests.join('、')) : null,
             )
