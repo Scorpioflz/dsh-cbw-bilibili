@@ -15,6 +15,16 @@
       "keywords": ["dsh", "dsh-plugin", "bilibili", "mcp", "duty"],
       "versions": [
         {
+          "version": "2.3.2",
+          "publishTimestamp": 1793452000,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Scorpioflz/dsh-cbw-bilibili",
+            "commit": "5e6890c"
+          },
+          "engines": { "dsh": ">=0.1.7-rc.1" }
+        },
+        {
           "version": "2.3.1",
           "publishTimestamp": 1793451051,
           "source": {
