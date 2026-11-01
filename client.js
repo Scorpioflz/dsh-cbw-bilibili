@@ -907,8 +907,8 @@ function WatchTab() {
               h('option', { value: '' }, '无工作区（插件家）'),
               (workspaceList || []).map((w) => h('option', { key: w.path, value: w.path }, w.title || w.path)),
             )),
-          h('div', { 'data-bd-note': '' }, '会话 ID 自动创建 + 复用：第一次跑时自动建一个无 preset 会话，之后固定复用，跨轮保留上下文。'),
-          h('div', { 'data-bd-note': '', style: { color: '#c2410c', fontWeight: 600 } }, '⚠️ 不要在 DSH 侧栏打开这个会话窗口：值班轮 / 私信回复要写它，你一开就锁住，下一轮会报 "already owned by an active write handle" 直接不跑。要看内容等它跑完、切到别的会话再快速看。'),
+          h('div', { 'data-bd-note': '' }, '会话 ID 自动创建 + 复用：第一次跑时自动建一个无 preset 会话，之后固定复用，跨轮保留上下文。新建的会话会自动归档隐藏（侧栏不显示）。'),
+          h('div', { 'data-bd-note': '', style: { color: '#c2410c', fontWeight: 600 } }, '⚠️ 不要在 DSH 侧栏打开值班会话窗口：值班轮 / 私信回复要写它，你一开就锁住，下一轮会报 "already owned by an active write handle" 直接不跑。如果侧栏看到值班会话（F5 刷新后可能出现），手动右键归档它即可——归档不影响值班轮运行，只从侧栏隐藏。'),
 
           h('div', { 'data-bd-sep': '' }),
           h(ToggleRow, {
