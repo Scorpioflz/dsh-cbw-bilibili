@@ -110,12 +110,8 @@ export const Config = !z ? undefined : z.object({
   /** ⭐ 私信收件人 UID 清单（字符串数组，可多个）；旧 dmUid 迁移到 [0] */
   dmRecipientUids: z.array(z.string()).default([]).extra('volatile', true),
   workspace: z.string().default('').extra('volatile', true),
-  /** ⭐ P0-B 固定会话：值班轮复用固定 sessionId（通过 CLI --session-id），保持跨轮对话上下文 */
-  fixedSession: z.boolean().default(true).extra('volatile', true),
-  /** ⭐ 固定会话 ID（值班轮） */
-  dutySessionId: z.string().default('dsh-cbw-bili-fixed').extra('volatile', true),
-  /** ⭐ 固定会话 ID（私信回复） */
-  dmSessionId: z.string().default('dsh-cbw-bili-dm-fixed').extra('volatile', true),
+  /** ⭐ 内部：自动创建的 DSH 会话 ID（值班轮 + 私信回复共用，跨轮保留上下文；空=还没创建，下次自动创建） */
+  sessionId: z.string().default('').extra('volatile', true),
   /** ⭐ dsh-web-service 地址（空=自动探测 127.0.0.1:3080；供 P1 爱好分析工具用） */
   webapiBase: z.string().default('').extra('volatile', true),
   /** ⭐ dsh-web-service API Key（空=本机免鉴权） */
@@ -302,7 +298,7 @@ function reportMeta() {
     // ⭐ 2.3.0：手动轮 / 抓取量 / 排除词 / 评论长度 —— 少一项 normalize 就会把用户存的值丢掉
     manualMax: 3, manualCooldownMin: 10, searchSort: 'pubdate', searchPages: 2, fetchPerRound: 8, excludeWords: [], commentLength: 'medium',
     modelProvider: '', modelName: '', runTimeoutMinutes: 20,
-    fixedSession: true, dutySessionId: 'dsh-cbw-bili-fixed', dmSessionId: 'dsh-cbw-bili-dm-fixed', webapiBase: '', webapiKey: '',
+    sessionId: '', webapiBase: '', webapiKey: '',
     // P1 爱好分析
     hobbyRefreshDays: 30, hobbyMaxVideos: 500, hobbyLastRefresh: 0,
     hobbyTimeHalfLifeDays: 180, hobbyDeepAnalyze: true, hobbyDeepSampleSize: 50,
@@ -369,9 +365,7 @@ function reportMeta() {
     if ('modelProvider' in p) p.modelProvider = String(p.modelProvider || '').trim().slice(0, 120)
     if ('modelName' in p) p.modelName = String(p.modelName || '').trim().slice(0, 160)
     if ('runTimeoutMinutes' in p) p.runTimeoutMinutes = Math.max(1, Math.min(Number(p.runTimeoutMinutes) || 20, 120))
-    if ('fixedSession' in p) p.fixedSession = Boolean(p.fixedSession)
-    if ('dutySessionId' in p) p.dutySessionId = String(p.dutySessionId || '').trim().slice(0, 120) || 'dsh-cbw-bili-fixed'
-    if ('dmSessionId' in p) p.dmSessionId = String(p.dmSessionId || '').trim().slice(0, 120) || 'dsh-cbw-bili-dm-fixed'
+    if ('sessionId' in p) p.sessionId = String(p.sessionId || '').trim().slice(0, 120)
     if ('webapiBase' in p) p.webapiBase = String(p.webapiBase || '').trim().slice(0, 300)
     if ('webapiKey' in p) p.webapiKey = String(p.webapiKey || '').trim().slice(0, 300)
     // P1 爱好分析
@@ -2563,10 +2557,9 @@ function reportMeta() {
     const overlay = ensureOverlay()
       const args = [...dsh.args, '--profile', effectiveProfile()]
     if (overlay) args.push('--patch', overlay)
-    // ⭐ P0-B 固定会话：复用固定 sessionId，保持跨轮对话上下文（上游私信回复已验证 --session-id 机制）
-    if (cfg.fixedSession && String(cfg.dutySessionId || '').trim()) {
-      args.push('--session-id', String(cfg.dutySessionId).trim())
-    }
+    // ⭐ 自动会话管理：有 sessionId 就复用（跨轮上下文），没有就不传（one-shot runner 自动创建无 preset session）
+    const sid = String(cfg.sessionId || '').trim()
+    if (sid) args.push('--session-id', sid)
     args.push(promptFor(why))
     // ⭐ 这一轮的工作目录 = 使用者（或别的用户）的**工作区** —— 只有这样它的 `AGENTS.md` 才会自动加载。
     // ⭐ 工作目录 = **插件家**：那一轮**被沙箱关着**，只写得了自己工作目录里的东西 ✗
@@ -2634,13 +2627,23 @@ function reportMeta() {
       const startedAt = dutyStartedAt
       if (dutyChild === child) dutyClear()
       log(`刷B站结束（${why}，code=${code}）`)
-      // ⭐ session 不存在/已失效：提醒用户去新建对话填 ID（不自动新建，避免丢上下文）
-      if (code !== 0 && cfg.fixedSession && String(cfg.dutySessionId || '').trim() && /does not exist/i.test(captured)) {
-        log('⚠️ 值班会话不存在或已失效 ⇒ 请在 DSH 侧栏新建一个对话、把它的 session ID 填进「设置 → 刷B站 → 高级 → 固定会话 ID」，再点跑一轮')
+      // ⭐ session 失效（不存在/preset 不兼容）⇒ 清掉 ID，下一轮自动创建新的
+      if (code !== 0 && sid && /does not exist|does not compose/i.test(captured)) {
+        log('⚠️ 值班会话失效（' + sid.slice(0, 20) + '…）⇒ 清掉 ID，下一轮自动新建')
+        try { saveCfg({ sessionId: '' }) } catch { /* 下次再说 */ }
       }
-      // ⭐ 2026-10-25：这一轮刚生成的会话，稍等它落盘后归档 —— 别让它占着侧栏「未分组」
-      // ⭐ P0-B：固定会话复用 sessionId，不产生新会话 ⇒ 跳过归档
-      if (!cfg.fixedSession) {
+      // ⭐ 没传 sid 且成功 ⇒ 捕获新 session ID 存 config，以后值班 + 私信都复用
+      if (!sid && code === 0) {
+        const newId = discoverDutySession(startedAt)
+        if (newId) {
+          log('值班会话已创建：' + newId.slice(0, 24) + '…（以后值班 + 私信都复用这个）')
+          try { saveCfg({ sessionId: newId }) } catch { /* 存不了下次再创建 */ }
+        } else {
+          log('⚠️ 没找到新会话 ID ⇒ 下次还是新会话（不影响这一轮）')
+        }
+      }
+      // ⭐ 2026-10-25：没传 sid 时这一轮新建了会话，稍等落盘后归档；有 sid 时复用固定会话 ⇒ 跳过归档
+      if (!sid) {
         try {
           const t = setTimeout(() => { archiveDutyBucket(startedAt - 5000) }, 1200)
           t.unref?.()
@@ -2856,11 +2859,10 @@ function reportMeta() {
       if (overlay) base.push('--patch', overlay)
       if (dmReplyRunning) { log('私信回复：上一条还在跑 ⇒ 这条等下一跳'); return { ok: false, busy: true } }
       dmReplyRunning = true
-      // ⭐ P0-B：优先用固定 dmSessionId，回退上游 discoverDmSession 逻辑
-      const fixedDmSid = cfg.fixedSession && String(cfg.dmSessionId || '').trim() ? String(cfg.dmSessionId).trim() : ''
-      const savedSid = fixedDmSid || readDmSession()
-      const args = savedSid ? [...base, '--session-id', savedSid, dmPromptFor(fromUid, text)] : [...base, dmPromptFor(fromUid, text)]
-      log(`私信回复开跑：来自 uid=${fromUid}` + (savedSid ? '（续会话 ' + savedSid.slice(0, 20) + '…）' : '（开新会话）'))
+      // ⭐ 和值班轮共用 cfg.sessionId：有就续会话，没有就开新的（one-shot runner 自动创建无 preset session）
+      const sid = String(cfg.sessionId || '').trim()
+      const args = sid ? [...base, '--session-id', sid, dmPromptFor(fromUid, text)] : [...base, dmPromptFor(fromUid, text)]
+      log(`私信回复开跑：来自 uid=${fromUid}` + (sid ? '（续会话 ' + sid.slice(0, 20) + '…）' : '（开新会话）'))
       const startedAt = Date.now()
       const child = spawn(dsh.command, args, {
         cwd: stateDir, shell: dsh.shell, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
@@ -2874,16 +2876,18 @@ function reportMeta() {
         dmReplyRunning = false
         log(`私信回复结束（code=${code}）`)
         rotateLogIfBig()
-        // ① 本来没有会话 id：跑完把它开出来的那个认领下来，下一条就能接着聊
-        if (!savedSid && code === 0) {
+        // ⭐ 没传 sid 且成功 ⇒ 捕获新 session ID 存 config（和值班轮共用）
+        if (!sid && code === 0) {
           const id = discoverDmSession(startedAt)
-          if (id) { writeDmSession(id); log('私信会话已记录：' + id.slice(0, 24) + '…（以后私信都接着这个会话）') }
-          else log('⚠️ 没找到这次的会话 id ⇒ 下一条私信还是新会话（不影响回复，只是没上下文）')
+          if (id) {
+            log('私信会话已创建：' + id.slice(0, 24) + '…（以后值班 + 私信都复用这个）')
+            try { saveCfg({ sessionId: id }) } catch { /* 存不了下次再创建 */ }
+          } else log('⚠️ 没找到这次的会话 id ⇒ 下一条私信还是新会话（不影响回复，只是没上下文）')
         }
-        // ② 带了 id 却失败（会话被删/迁移过）⇒ 丢掉它，下一条重开，别卡死在坏 id 上
-        if (savedSid && code !== 0) {
-          writeDmSession('')
-          log('⚠️ 续会话失败（' + savedSid.slice(0, 16) + '…）⇒ 清掉 id，立刻用新会话重试一次（这条不能没回）')
+        // ⭐ 带了 sid 却失败（会话被删/preset 不兼容）⇒ 清掉 config.sessionId，立刻重试一次（这条不能没回）
+        if (sid && code !== 0) {
+          log('⚠️ 续会话失败（' + sid.slice(0, 16) + '…）⇒ 清掉 ID，立刻用新会话重试一次（这条不能没回）')
+          try { saveCfg({ sessionId: '' }) } catch { /* 下次再说 */ }
           setTimeout(() => { try { runDmReply(fromUid, text) } catch { /* 兜住 */ } }, 800)
         }
       })
@@ -4212,8 +4216,8 @@ function reportMeta() {
   //    延迟几秒：workspaceRegistry 服务未必比这个插件先就绪。
   try {
     const t = setTimeout(() => {
-      const dmSid = (() => { try { return String(readDmSession() || '') } catch { return '' } })()
-      archiveDutyBucket(0, new Set(dmSid ? [dmSid] : []))
+      const sid = String(cfg.sessionId || '').trim()
+      archiveDutyBucket(0, new Set(sid ? [sid] : []))
     }, 5000)
     t.unref?.()
   } catch { /* 忽略 */ }

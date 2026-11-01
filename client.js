@@ -283,9 +283,7 @@ function WatchTab() {
       const [masterUid, setMasterUid] = React.useState(null)      // P0-A 主人 UID
       const [mentionNamesStr, setMentionNamesStr] = React.useState(null)  // P0-A @ 昵称清单（逗号分隔）
       const [dmRecipStr, setDmRecipStr] = React.useState(null)    // P0-A 私信收件人 UID 清单（逗号分隔）
-      const [dutySid, setDutySid] = React.useState(null)          // P0-B 值班固定会话 ID
-      const [dmSid, setDmSid] = React.useState(null)              // P0-B 私信固定会话 ID
-      const [fixedSess, setFixedSess] = React.useState(null)      // P0-B 固定会话开关
+      const [workspaceStr, setWorkspaceStr] = React.useState(null)  // 值班会话工作区（空=插件家）
       const [hobbyRefresh, setHobbyRefresh] = React.useState(null)  // P1 画像刷新周期（天）
       const [hobbyMaxVids, setHobbyMaxVids] = React.useState(null)  // P1 单次分析最多视频数
       const [hobbyBusy, setHobbyBusy] = React.useState(false)       // P1 分析中
@@ -347,10 +345,8 @@ function WatchTab() {
         if (cfg && masterUid === null) setMasterUid(cfg.masterUid ? String(cfg.masterUid) : (cfg.dmUid ? String(cfg.dmUid) : ''))
         if (cfg && mentionNamesStr === null) setMentionNamesStr(Array.isArray(cfg.mentionNames) ? cfg.mentionNames.join(', ') : (cfg.mentionName || ''))
         if (cfg && dmRecipStr === null) setDmRecipStr(Array.isArray(cfg.dmRecipientUids) ? cfg.dmRecipientUids.map(String).join(', ') : (cfg.dmUid ? String(cfg.dmUid) : ''))
-        // P0-B 固定会话
-        if (cfg && dutySid === null) setDutySid(cfg.dutySessionId || '')
-        if (cfg && dmSid === null) setDmSid(cfg.dmSessionId || '')
-        if (cfg && fixedSess === null) setFixedSess(Boolean(cfg.fixedSession))
+        // 值班会话工作区
+        if (cfg && workspaceStr === null) setWorkspaceStr(String(cfg.workspace || ''))
         // P1 爱好分析
         if (cfg && hobbyRefresh === null) setHobbyRefresh(Number(cfg.hobbyRefreshDays) || 30)
         if (cfg && hobbyMaxVids === null) setHobbyMaxVids(Number(cfg.hobbyMaxVideos) || 500)
@@ -889,35 +885,19 @@ function WatchTab() {
           }),
           h('div', { 'data-bd-note': '' }, '旧字段 mentionName / dmUid 仍保留兼容；新字段留空时自动回退到旧字段。'),
 
-          // P0-B 固定会话：值班 + 私信复用同一会话，跨轮保留上下文
+          // 会话工作区 + 自动会话管理
           h('div', { 'data-bd-sep': '' }),
-          h(ToggleRow, {
-            label: '固定会话（跨轮保留上下文）',
-            note: '开了以后值班轮和私信回复都复用同一个 DSH 会话 ID，不每轮新建。⭐ 需要先用 dsh CLI 建一个会话拿到 ID 填到下面。',
-            on: Boolean(fixedSess),
-            onChange: (v) => { setFixedSess(v); patch({ fixedSession: v }, '固定会话') },
-          }),
-          fixedSess ? h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-row': '' },
-              h('div', { 'data-bd-grow': '' },
-                h('div', { 'data-bd-label': '' }, '值班会话 ID'),
-                h('div', { 'data-bd-note': '' }, 'runDuty 用 --session-id 传给 dsh CLI；留空则值班不固定')),
-              h('input', {
-                'data-bd-input': '', value: dutySid ?? '',
-                placeholder: 'dsh 会话 ID（uuid）',
-                onChange: (e) => setDutySid(e.target.value),
-                onBlur: () => { const v = String(dutySid || '').trim(); setDutySid(v); patch({ dutySessionId: v }, '值班会话 ID') },
-              })),
-            h('div', { 'data-bd-row': '' },
-              h('div', { 'data-bd-grow': '' },
-                h('div', { 'data-bd-label': '' }, '私信会话 ID'),
-                h('div', { 'data-bd-note': '' }, '私信回复用这个会话；留空则私信不固定')),
-              h('input', {
-                'data-bd-input': '', value: dmSid ?? '',
-                placeholder: 'dsh 会话 ID（uuid）',
-                onChange: (e) => setDmSid(e.target.value),
-                onBlur: () => { const v = String(dmSid || '').trim(); setDmSid(v); patch({ dmSessionId: v }, '私信会话 ID') },
-              }))) : null,
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '会话工作区'),
+              h('div', { 'data-bd-note': '' }, '值班 + 私信的 DSH 会话归到这个工作区（空=插件家）。填桌宠工作区路径可共享记忆')),
+            h('input', {
+              'data-bd-input': '', value: workspaceStr ?? '',
+              placeholder: '如 D:\\DSH-Dev\\dsh-pet-chubby_blue_whale',
+              onChange: (e) => setWorkspaceStr(e.target.value),
+              onBlur: () => { const v = String(workspaceStr || '').trim(); setWorkspaceStr(v); patch({ workspace: v }, '会话工作区') },
+            })),
+          h('div', { 'data-bd-note': '' }, '会话 ID 自动创建 + 复用：第一次跑时自动建一个无 preset 会话，之后固定复用，跨轮保留上下文。'),
 
           h('div', { 'data-bd-sep': '' }),
           h(ToggleRow, {
