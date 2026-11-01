@@ -2638,6 +2638,18 @@ function reportMeta() {
         if (newId) {
           log('值班会话已创建：' + newId.slice(0, 24) + '…（以后值班 + 私信都复用这个）')
           try { saveCfg({ sessionId: newId }) } catch { /* 存不了下次再创建 */ }
+          // ⭐ 把新 session 关联到工作区（否则侧栏显示在「未分组」）
+          ;(async () => {
+            try {
+              const reg = ctx.get('workspaceRegistry')
+              if (!reg) return
+              const ws = await reg.resolveByPath(dutyCwd())
+              if (ws && typeof ws.insertSessionBefore === 'function') {
+                await ws.insertSessionBefore(newId)
+                log('已把值班会话归到工作区：' + (ws.title || ws.path || ''))
+              }
+            } catch (e) { log('⚠️ 关联工作区失败：' + String(e?.message ?? e)) }
+          })()
         } else {
           log('⚠️ 没找到新会话 ID ⇒ 下次还是新会话（不影响这一轮）')
         }
