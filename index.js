@@ -2632,6 +2632,10 @@ function reportMeta() {
         log('⚠️ 值班会话失效（' + sid.slice(0, 20) + '…）⇒ 清掉 ID，下一轮自动新建')
         try { saveCfg({ sessionId: '' }) } catch { /* 下次再说 */ }
       }
+      // ⭐ session 被锁住（用户在侧栏打开了会话窗口）⇒ 提示关掉，不清 ID（上下文还在）
+      if (code !== 0 && sid && /already owned by an active write handle/i.test(captured)) {
+        log('⚠️ 值班会话被锁住（' + sid.slice(0, 20) + '…）⇒ 你在 DSH 侧栏打开了那个会话窗口，关掉它再试。上下文还在，不清 ID。')
+      }
       // ⭐ 没传 sid 且成功 ⇒ 捕获新 session ID 存 config，以后值班 + 私信都复用
       if (!sid && code === 0) {
         const newId = discoverDmSession(startedAt)
