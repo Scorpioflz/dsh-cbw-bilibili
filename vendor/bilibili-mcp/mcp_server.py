@@ -623,6 +623,13 @@ async def bili_video_info(bvid: str) -> str:
     info = await v.get_info()
     stat = info.get("stat", {})
 
+    # ⭐ get_info() 返回的 tag 字段通常为空，需单独调 get_tags() 获取
+    try:
+        tag_list = await v.get_tags()
+        tags = [t.get("tag_name") for t in tag_list if t.get("tag_name")]
+    except:
+        tags = [t.get("tag_name") for t in info.get("tag", []) if t.get("tag_name")]
+
     return json.dumps({
         "bvid": info.get("bvid"),
         "aid": info.get("aid"),
@@ -631,7 +638,7 @@ async def bili_video_info(bvid: str) -> str:
         "author": info.get("owner", {}).get("name"),
         "duration": info.get("duration"),
         "pages": len(info.get("pages", [])),
-        "tags": [t.get("tag_name") for t in info.get("tag", []) if t.get("tag_name")],
+        "tags": tags,
         "stat": {
             "view": stat.get("view", 0),
             "danmaku": stat.get("danmaku", 0),
