@@ -2614,8 +2614,13 @@ function reportMeta() {
         try { return new TextDecoder('gbk').decode(b) } catch { return u }
       } catch { return String(buf) }
     }
+    let captured = ''
     const pick = (buf) => {
-      try { appendFileSync(logFile, toText(buf), 'utf8') } catch { /* 写不进去就丢，绝不能抛 */ }
+      try {
+        const text = toText(buf)
+        if (captured.length < 8192) captured += text
+        appendFileSync(logFile, text, 'utf8')
+      } catch { /* 写不进去就丢，绝不能抛 */ }
     }
     child.stdout?.on('data', pick)
     child.stderr?.on('data', pick)
@@ -2629,6 +2634,10 @@ function reportMeta() {
       const startedAt = dutyStartedAt
       if (dutyChild === child) dutyClear()
       log(`刷B站结束（${why}，code=${code}）`)
+      // ⭐ session 不存在/已失效：提醒用户去新建对话填 ID（不自动新建，避免丢上下文）
+      if (code !== 0 && cfg.fixedSession && String(cfg.dutySessionId || '').trim() && /does not exist/i.test(captured)) {
+        log('⚠️ 值班会话不存在或已失效 ⇒ 请在 DSH 侧栏新建一个对话、把它的 session ID 填进「设置 → 刷B站 → 高级 → 固定会话 ID」，再点跑一轮')
+      }
       // ⭐ 2026-10-25：这一轮刚生成的会话，稍等它落盘后归档 —— 别让它占着侧栏「未分组」
       // ⭐ P0-B：固定会话复用 sessionId，不产生新会话 ⇒ 跳过归档
       if (!cfg.fixedSession) {
@@ -2918,9 +2927,9 @@ function reportMeta() {
         log('私信监听：还不知道"我自己的 UID"⇒ 先不监听（设置 → 刷B站 → 高级 →「只回谁的私信」）')
         return
       }
-      if (((Array.isArray(cfg.mentionNames) && cfg.mentionNames.length ? cfg.mentionNames[0] : '') || String(cfg.mentionName || '')).trim()) {
-        const configured = Number(cfg.dmOwnerUid) > 0
-        if (!configured) {
+      {
+        const ownUid = (() => { try { return Number(dmCred(stateDir)?.dedeuserid) || 0 } catch { return 0 } })()
+        if (owner > 0 && owner === ownUid) {
           log('私信监听：现在只回"登录账号自己"的私信；想回你大号的话，请在高级里填「只回谁的私信」= 你自己的 UID')
         }
       }
