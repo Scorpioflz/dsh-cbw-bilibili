@@ -1005,22 +1005,35 @@ function reportMeta() {
     return Number(cfg.dmUid) || 0
   }
 
-  /** 聚合统计：从收藏夹视频列表里算 topUploaders / timeDistribution / totalVideos */
-  const aggregateFavorites = (allVideos, maxVideos) => {
+  /** 聚合统计：从收藏夹视频列表里算 topUploaders / timeDistribution / totalVideos
+   *  UP 主频次加时间衰减权重：近期收藏的 UP 主权重高，5 年前的 UP 主权重极低
+   *  同时记录 rawCount（原始收藏数）和 lastFavDaysAgo（最近收藏距今天数），供区分当前偏好 vs 历史偏好 */
+  const aggregateFavorites = (allVideos, maxVideos, halfLifeDays = 180) => {
     const total = allVideos.length
-    // UP 主频次
+    // UP 主频次（加权）
     const uploaderMap = {}
     for (const v of allVideos) {
       const name = String(v.author || '').trim()
       if (name) {
-        if (!uploaderMap[name]) uploaderMap[name] = { count: 0, mid: Number(v.upper_mid) || 0 }
-        uploaderMap[name].count++
+        if (!uploaderMap[name]) uploaderMap[name] = { count: 0, rawCount: 0, mid: Number(v.upper_mid) || 0, lastFavTime: 0 }
+        uploaderMap[name].count += timeWeight(v.fav_time, halfLifeDays)
+        uploaderMap[name].rawCount++
+        const ft = Number(v.fav_time) || 0
+        if (ft > uploaderMap[name].lastFavTime) uploaderMap[name].lastFavTime = ft
         if (!uploaderMap[name].mid) uploaderMap[name].mid = Number(v.upper_mid) || 0
       }
     }
+    const nowSec = Date.now() / 1000
     const topUploaders = Object.entries(uploaderMap)
       .sort((a, b) => b[1].count - a[1].count).slice(0, 10)
-      .map(([name, info]) => ({ name, count: info.count, mid: info.mid, ratio: Math.round((info.count / total) * 100) / 100 }))
+      .map(([name, info]) => ({
+        name,
+        count: Math.round(info.count * 100) / 100,
+        rawCount: info.rawCount,
+        mid: info.mid,
+        ratio: Math.round((info.rawCount / total) * 100) / 100,
+        lastFavDaysAgo: info.lastFavTime > 0 ? Math.round((nowSec - info.lastFavTime) / 86400) : null,
+      }))
 
     // 时间分布（按月）
     const monthMap = {}
@@ -1226,8 +1239,8 @@ function reportMeta() {
     let userInfo = {}
     try { userInfo = await call('bili_user_info', { uid: targetUid }) } catch { /* 拿不到也不挡 */ }
 
-    const agg = aggregateFavorites(allVideos, limit)
     const halfLifeDays = Number(cfg.hobbyTimeHalfLifeDays) || 180
+    const agg = aggregateFavorites(allVideos, limit, halfLifeDays)
     const titleKeywords = extractTitleKeywords(allVideos, 20, halfLifeDays)
 
     // ⭐ 深度采集：视频 Tag（高权重）+ UP 主签名词（低权重）
@@ -1256,6 +1269,12 @@ function reportMeta() {
       secondaryInterests: mergedInterests.slice(5, 10).map((k) => k.word),
       tagInterests: tagKeywords.slice(0, 10).map((k) => k.word),
       preferredUploaders: agg.topUploaders.slice(0, 5).map((u) => u.name),
+      preferredUploaderDetails: agg.topUploaders.slice(0, 5).map((u) => ({
+        name: u.name,
+        rawCount: u.rawCount,
+        weightedCount: u.count,
+        lastFavDaysAgo: u.lastFavDaysAgo,
+      })),
       tags: mergedInterests.slice(0, 15).map((k) => k.word),
       activityLevel,
       interestShift,

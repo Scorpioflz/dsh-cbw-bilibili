@@ -1057,8 +1057,14 @@ function WatchTab() {
                 + '收藏视频：' + hp.favorites?.totalVideos + ' 条；'
                 + '活跃度：' + hp.hobbyProfile?.activityLevel + '；'
                 + '兴趣迁移：' + hp.hobbyProfile?.interestShift),
-              hp.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
-                '偏好 UP 主：' + hp.hobbyProfile.preferredUploaders.join('、')) : null,
+              hp.hobbyProfile?.preferredUploaderDetails?.length ? h('div', { 'data-bd-note': '' },
+                '偏好 UP 主：' + hp.hobbyProfile.preferredUploaderDetails.map((u) => {
+                  if (u.lastFavDaysAgo == null) return u.name
+                  if (u.lastFavDaysAgo < 30) return `${u.name}(${u.lastFavDaysAgo}天前)`
+                  if (u.lastFavDaysAgo < 365) return `${u.name}(${Math.round(u.lastFavDaysAgo / 30)}月前)`
+                  return `${u.name}(${Math.round(u.lastFavDaysAgo / 365)}年前)`
+                }).join('、')) : (hp.hobbyProfile?.preferredUploaders?.length ? h('div', { 'data-bd-note': '' },
+                '偏好 UP 主：' + hp.hobbyProfile.preferredUploaders.join('、')) : null),
               hp.hobbyProfile?.tagInterests?.length ? h('div', { 'data-bd-note': '' },
                 '视频标签：' + hp.hobbyProfile.tagInterests.join('、')) : null,
               hp.hobbyProfile?.primaryInterests?.length ? h('div', { 'data-bd-note': '' },
