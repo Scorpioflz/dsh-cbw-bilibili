@@ -284,6 +284,7 @@ function WatchTab() {
       const [mentionNamesStr, setMentionNamesStr] = React.useState(null)  // P0-A @ 昵称清单（逗号分隔）
       const [dmRecipStr, setDmRecipStr] = React.useState(null)    // P0-A 私信收件人 UID 清单（逗号分隔）
       const [workspaceStr, setWorkspaceStr] = React.useState(null)  // 值班会话工作区（空=插件家）
+      const [workspaceList, setWorkspaceList] = React.useState(null)  // 可选工作区列表（从宿主加载）
       const [hobbyRefresh, setHobbyRefresh] = React.useState(null)  // P1 画像刷新周期（天）
       const [hobbyMaxVids, setHobbyMaxVids] = React.useState(null)  // P1 单次分析最多视频数
       const [hobbyBusy, setHobbyBusy] = React.useState(false)       // P1 分析中
@@ -379,6 +380,13 @@ function WatchTab() {
         jget('/models').then((r) => { if (alive.current) setModelList(r && r.ok ? (r.providers || []) : []) })
           .catch(() => { if (alive.current) setModelList([]) })
       }, [modelList])
+
+      // ⭐ 工作区列表（宿主 workspaceRegistry 里已登记的）—— 供设置页下拉选
+      React.useEffect(() => {
+        if (workspaceList !== null) return
+        jget('/workspaces').then((r) => { if (alive.current) setWorkspaceList(r && r.ok ? (r.workspaces || []) : []) })
+          .catch(() => { if (alive.current) setWorkspaceList([]) })
+      }, [workspaceList])
 
       const win = { ...DEFAULT_WINDOWS, ...(st?.windows || {}) }
 
@@ -890,13 +898,15 @@ function WatchTab() {
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
               h('div', { 'data-bd-label': '' }, '会话工作区'),
-              h('div', { 'data-bd-note': '' }, '值班 + 私信的 DSH 会话归到这个工作区（空=插件家）。填桌宠工作区路径可共享记忆')),
-            h('input', {
-              'data-bd-input': '', value: workspaceStr ?? '',
-              placeholder: '如 D:\\DSH-Dev\\dsh-pet-chubby_blue_whale',
-              onChange: (e) => setWorkspaceStr(e.target.value),
-              onBlur: () => { const v = String(workspaceStr || '').trim(); setWorkspaceStr(v); patch({ workspace: v }, '会话工作区') },
-            })),
+              h('div', { 'data-bd-note': '' }, '值班 + 私信的 DSH 会话归到这个工作区。选桌宠工作区可共享记忆')),
+            h('select', {
+              'data-bd-input': '',
+              value: workspaceStr ?? '',
+              onChange: (e) => { const v = e.target.value; setWorkspaceStr(v); patch({ workspace: v }, '会话工作区') },
+            },
+              h('option', { value: '' }, '无工作区（插件家）'),
+              (workspaceList || []).map((w) => h('option', { key: w.path, value: w.path }, w.title || w.path)),
+            )),
           h('div', { 'data-bd-note': '' }, '会话 ID 自动创建 + 复用：第一次跑时自动建一个无 preset 会话，之后固定复用，跨轮保留上下文。'),
 
           h('div', { 'data-bd-sep': '' }),

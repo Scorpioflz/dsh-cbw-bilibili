@@ -3747,6 +3747,17 @@ function reportMeta() {
       return sendJson(res, 200, { ok: true, ...cat, chosen: chosenModel() })
     }
 
+    // ⭐ 工作区列表：供设置页下拉选择（值班会话归到哪个工作区）
+    if (req.method === 'GET' && path === '/api/dsh-cbw-bili/workspaces') {
+      const list = []
+      try {
+        for (const w of (ctx.get('workspaceRegistry')?.list?.() || [])) {
+          list.push({ path: String(w.path || ''), title: String(w.title || '') })
+        }
+      } catch { /* 拿不到注册表 ⇒ 空列表 */ }
+      return sendJson(res, 200, { ok: true, workspaces: list })
+    }
+
     if (req.method === 'POST' && path === '/api/dsh-cbw-bili/config') {
       const body = await readBody(req)
       const patch = {}
