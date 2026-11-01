@@ -1107,8 +1107,11 @@ function reportMeta() {
       for (const res of results) {
         if (res.status !== 'fulfilled') { log(`深度采集 bili_video_info 失败: ${res.reason?.message || res.reason}`); continue }
         if (!res.value?.r) continue
+        const r = res.value.r
+        const tags = Array.isArray(r?.tags) ? r.tags : (typeof r === 'string' ? [] : [])
+        if (!tags.length) { log(`深度采集 bvid=${res.value.v?.bvid} tags 为空 (r类型=${typeof r})`); continue }
         const tw = timeWeight(res.value.v.fav_time, halfLifeDays)
-        for (const tag of (res.value.r.tags || [])) {
+        for (const tag of tags) {
           const t = String(tag).trim()
           if (t.length >= 2) tagFreq[t] = (tagFreq[t] || 0) + tw * 3  // tag 权重 ×3
         }
