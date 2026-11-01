@@ -4,7 +4,7 @@
   <a href="./README_ZH.md">中文</a> | <a href="./README.md">English</a>
 </p>
 
-A DeepSeek Harness (DSH) plugin that watches Bilibili for you — searches, reads subtitles, picks worth-your-time videos, writes a daily report, and @-mentions you. Forked from [`dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll) v2.3.1 with significant enhancements: fixed-session continuity, master profile analysis, hobby画像, interest learning with half-life decay, storyboard frames, and comment safety gates.
+A DeepSeek Harness (DSH) plugin that watches Bilibili for you — searches, reads subtitles, picks worth-your-time videos, writes a daily report, and @-mentions you. Forked from [`dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll) v2.3.1 with significant enhancements: auto session management (duty rounds + DM replies share one session, auto create/reuse/rebuild/attach-to-workspace), master profile analysis, hobby画像, interest learning with half-life decay, storyboard frames, and comment safety gates.
 
 ## Features
 
@@ -18,7 +18,7 @@ A DeepSeek Harness (DSH) plugin that watches Bilibili for you — searches, read
 - **Timeout watchdog** — `runTimeoutMinutes` (default 20)
 
 ### Added in this fork
-- **Fixed session continuity** — duty rounds reuse a fixed `sessionId` via CLI `--session-id` parameter, preserving full conversation context across rounds. Fixed session skips duty bucket archiving.
+- **Auto session management** — duty rounds and DM replies **share one DSH session**, preserving full conversation context across rounds. First run auto-creates a session (no preset, reusable by one-shot runner), captures sessionId into config, then reuses it; on session invalidation (does not exist / does not compose) auto-clears ID and rebuilds. Optionally attaches to a chosen workspace (sidebar grouping, shared pet memory).
 - **Master profile & hobby analysis** — `masterUid` identifies the master; `bili_analyze_hobby` analyzes public favorites + following list → hobby画像 → injected into @dsh-cbw/memory as long-term facts. Configurable refresh cycle (`hobbyRefreshDays`, default 30).
 - **Decoupled identity** — `masterUid` (master, by UID) vs `mentionNames` (comment @-list, by nickname, multiple) vs `dmRecipients` (DM recipients, multiple). Friends can be added to share recommendations without being the master.
 - **Interest learning with half-life decay** — replaces static `keywords` config; auto-extracts interest words from picked videos, decays over time. *[Borrowed from bilihave/dsh-whale-panel]*
@@ -41,7 +41,7 @@ All upstream code (`index.js`, `client.js`, `lib/`, `prompts/`, `vendor/`, `prof
 ## Dependencies
 
 ### Required (for added features)
-- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — optional; fixed-session uses CLI `--session-id` (not web-service REST). web-service base URL configurable via `webapiBase` for P1 hobby analysis tool API.
+
 - **[@dsh-cbw/memory](https://github.com/Scorpioflz/dsh-cbw-memory)** — hobby画像 and interest words are stored as long-term facts. Optional but recommended; without it,画像 is only kept locally in `hobby.json`.
 
 ### Bundled
@@ -67,7 +67,7 @@ All upstream code (`index.js`, `client.js`, `lib/`, `prompts/`, `vendor/`, `prof
 | Project | Source | Usage |
 |---|---|---|
 | **@dsh-cbw/memory** | https://github.com/Scorpioflz/dsh-cbw-memory | Stores hobby画像 and interest words as long-term facts |
-| **dsh-web-service** | https://github.com/toddpan/dsh-webapi | Fixed-session REST/SSE API |
+
 
 > Full third-party notices: see [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
@@ -75,7 +75,7 @@ All upstream code (`index.js`, `client.js`, `lib/`, `prompts/`, `vendor/`, `prof
 
 | Area | Upstream (dsh-bili-scroll) | This fork (@dsh-cbw/bilibili) |
 |---|---|---|
-| Duty session | One-shot CLI spawn per round, no context | Fixed `sessionId` reuse via CLI `--session-id`, full context; fixed session skips bucket archiving |
+| Duty session | One-shot CLI spawn per round, no context | Auto session management: first run creates a no-preset session → captures sessionId → reuses thereafter; duty rounds + DM replies share one session; auto-rebuilds on invalidation; can attach to a workspace |
 | Master identity | `mentionName` (nickname, single) + `dmUid` | `masterUid` (UID) + `mentionNames[]` (nicknames) + `dmRecipientUids[]` (UIDs) |
 | Hobby analysis | None | `bili_user_favorites` / `bili_user_profile` / `bili_analyze_hobby` |
 | Search keywords | Static `keywords[]` config | Auto-learned interest words with half-life decay |
@@ -98,7 +98,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 
 > **Prerequisite**: Python 3.10+ or `uv` on the machine. The plugin auto-downloads `uv` if neither is present.
 > **After install**: restart DSH (bundle layer needs restart), then go to Settings → 刷B站 → install dependencies → scan-login.
-> **Recommended companions**: install `dsh-web-service` (for fixed-session) and `@dsh-cbw/memory` (for画像 persistence).
+> **Recommended companion**: install `@dsh-cbw/memory` (for画像 persistence).
 
 ## Configuration
 
@@ -111,14 +111,15 @@ All settings are configurable via the DSH settings page or `~/.dsh/dsh-cbw-bilib
 | `mentionNames` | `[]` | Comment @-list (nicknames, multiple). Friends can be included |
 | `dmRecipientUids` | `[]` | DM recipients UIDs (string array, multiple) |
 
-### Fixed session (new in this fork)
+### Auto session management (new in this fork)
 | Parameter | Default | Description |
 |---|---|---|
-| `fixedSession` | `true` | Enable fixed-session reuse via CLI `--session-id` |
-| `dutySessionId` | `'dsh-cbw-bili-fixed'` | Fixed session ID for duty rounds |
-| `dmSessionId` | `'bili-dm-fixed'` | Fixed session ID for DM replies |
+| `workspace` | `''` | Workspace path for the duty session. Settings page shows a dropdown of all registered workspaces; choose "no workspace" to keep session in the plugin home dir. Set to pet workspace path to share memory |
+| `sessionId` | `''` | Current reused session ID (auto-managed internally, no need to fill). Empty on first run → auto-created → captured & stored; auto-cleared & rebuilt on invalidation |
 | `webapiBase` | `''` | dsh-web-service base URL (for P1 hobby analysis API; empty = auto-detect `127.0.0.1:3080`) |
 | `webapiKey` | `''` | API Key (empty = local no-auth) |
+
+> **Session lifecycle**: first run (`sessionId` empty) → one-shot runner creates a no-preset session → exit handler captures the new sessionId → `attachSession` associates it with the configured workspace → stored in config. Subsequent rounds reuse that sessionId. If the session becomes invalid (stderr contains "does not exist" / "does not compose"), sessionId is auto-cleared and recreated next round. Duty rounds and DM replies share the same session.
 
 ### Hobby analysis (new in this fork)
 | Parameter | Default | Description |
@@ -148,7 +149,7 @@ All settings are configurable via the DSH settings page or `~/.dsh/dsh-cbw-bilib
 | `autoComment` | `false` | Auto-comment and @ user |
 | `dmMode` | `'only'` | DM delivery: off / only / both |
 | `keywords` | `[]` | Search keywords (empty = use charter defaults; overridden by interest learning) |
-| `workspace` | `''` | Duty round working directory (session归该工作区) |
+
 | `headlessProfile` | `'dsh-cbw-bili'` | Profile for duty rounds |
 | `runTimeoutMinutes` | `20` | Max minutes per round |
 | `modelProvider` | `''` | Model provider for duty rounds (empty = follow current session) |

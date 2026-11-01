@@ -4,7 +4,7 @@
   <a href="./README.md">English</a> | <a href="./README_ZH.md">中文</a>
 </p>
 
-DeepSeek Harness (DSH) 插件：每天替你刷一轮 B站 —— 搜视频、读字幕判断值不值得、写一份日报，值得的就 @ 你。Fork 自 [`dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll) v2.3.1，新增：固定会话延续、主人画像分析、爱好画像、兴趣学习（半衰期淡忘）、分镜图、评论安全闸门。
+DeepSeek Harness (DSH) 插件：每天替你刷一轮 B站 —— 搜视频、读字幕判断值不值得、写一份日报，值得的就 @ 你。Fork 自 [`dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll) v2.3.1，新增：自动会话管理（值班轮 + 私信回复共用一个会话，自动创建/复用/失效重建/关联工作区）、主人画像分析、爱好画像、兴趣学习（半衰期淡忘）、分镜图、评论安全闸门。
 
 ## 功能
 
@@ -18,7 +18,7 @@ DeepSeek Harness (DSH) 插件：每天替你刷一轮 B站 —— 搜视频、�
 - **超时看门狗** — `runTimeoutMinutes`（默认 20）
 
 ### 本 fork 新增
-- **固定会话延续** — 值班轮通过 CLI `--session-id` 参数复用固定 `sessionId`，跨轮保持完整对话上下文。固定会话下跳过值班桶归档。
+- **自动会话管理** — 值班轮与私信回复**共用一个 DSH 会话**，跨轮保持完整对话上下文。首次运行自动创建会话（无 preset，one-shot runner 可复用），捕获 sessionId 存配置，之后固定复用；会话失效（does not exist / does not compose）时自动清 ID 重建。可选关联到指定工作区（侧栏分组，共享桌宠记忆）。
 - **主人画像与爱好分析** — `masterUid` 识别主人；`bili_analyze_hobby` 分析公开收藏夹 + 关注列表 → 爱好画像 → 写入 @dsh-cbw/memory 作为长期事实。刷新周期可配（`hobbyRefreshDays`，默认 30 天）。
 - **身份解耦** — `masterUid`（主人，UID）vs `mentionNames`（评论 @ 清单，昵称，可多个）vs `dmRecipients`（私信收件人，可多个）。朋友也能加入分享推荐，不必是主人。
 - **兴趣学习 + 半衰期淡忘** — 替代死配置 `keywords`；从值班轮挑的视频自动提取兴趣词，按半衰期淡忘。*[借鉴 bilihave/dsh-whale-panel]*
@@ -41,7 +41,7 @@ git merge upstream/main
 ## 依赖
 
 ### 功能依赖（新增功能需要）
-- **[dsh-web-service](https://github.com/toddpan/dsh-webapi)** — 可选；固定会话用 CLI `--session-id`（不走 web-service REST）。`webapiBase` 配置 web-service 地址供 P1 爱好分析工具 API 用。
+
 - **[@dsh-cbw/memory](https://github.com/Scorpioflz/dsh-cbw-memory)** — 爱好画像和兴趣词作为长期事实存储。可选但推荐；不装则画像仅本地存于 `hobby.json`。
 
 ### 内置
@@ -67,7 +67,7 @@ git merge upstream/main
 | 项目 | 源地址 | 用途 |
 |---|---|---|
 | **@dsh-cbw/memory** | https://github.com/Scorpioflz/dsh-cbw-memory | 爱好画像和兴趣词作为长期事实存储 |
-| **dsh-web-service** | https://github.com/toddpan/dsh-webapi | 固定会话 REST/SSE API |
+
 
 > 完整第三方声明：见 [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md)。
 
@@ -75,7 +75,7 @@ git merge upstream/main
 
 | 方面 | 上游（dsh-bili-scroll） | 本 fork（@dsh-cbw/bilibili） |
 |---|---|---|
-| 值班会话 | 每轮一次性 CLI spawn，无上下文 | 固定 `sessionId` 复用（CLI `--session-id`），完整上下文；固定会话跳过桶归档 |
+| 值班会话 | 每轮一次性 CLI spawn，无上下文 | 自动会话管理：首次创建无 preset 会话 → 捕获 sessionId → 之后复用；值班轮 + 私信回复共用；失效自动重建；可关联工作区 |
 | 主人识别 | `mentionName`（昵称，单个）+ `dmUid` | `masterUid`（UID）+ `mentionNames[]`（昵称）+ `dmRecipientUids[]`（UID） |
 | 爱好分析 | 无 | `bili_user_favorites` / `bili_user_profile` / `bili_analyze_hobby` |
 | 搜索关键词 | 死配置 `keywords[]` | 自动学习兴趣词 + 半衰期淡忘 |
@@ -98,7 +98,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 
 > **前提**：机器上有 Python 3.10+ 或 `uv`。插件会自动下载 `uv`（若都没有）。
 > **安装后**：重启 DSH（bundle 层需重启），进设置 → 刷B站 → 装依赖 → 扫码登录。
-> **推荐配套**：安装 `dsh-web-service`（固定会话）和 `@dsh-cbw/memory`（画像持久化）。
+> **推荐配套**：安装 `@dsh-cbw/memory`（画像持久化）。
 
 ## 配置
 
@@ -111,14 +111,15 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `mentionNames` | `[]` | 评论 @ 清单（昵称，可多个）。朋友也可加入 |
 | `dmRecipientUids` | `[]` | 私信收件人 UID 清单（字符串数组，可多个） |
 
-### 固定会话（本 fork 新增）
+### 自动会话管理（本 fork 新增）
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `fixedSession` | `true` | 开启固定会话复用（CLI `--session-id`） |
-| `dutySessionId` | `'dsh-cbw-bili-fixed'` | 值班固定会话 ID |
-| `dmSessionId` | `'bili-dm-fixed'` | 私信固定会话 ID |
+| `workspace` | `''` | 值班会话归属的工作区路径。设置页为下拉选择器，列所有已登记工作区；选「无工作区」则 session 在插件家目录。填桌宠工作区路径可共享记忆 |
+| `sessionId` | `''` | 当前复用的会话 ID（内部自动管理，无需手填）。首次运行为空 → 自动创建 → 捕获存入；失效自动清空重建 |
 | `webapiBase` | `''` | dsh-web-service 地址（P1 爱好分析工具用；空 = 自动探测 `127.0.0.1:3080`） |
 | `webapiKey` | `''` | API Key（空 = 本机免鉴权） |
+
+> **会话生命周期**：首次运行（`sessionId` 为空）→ one-shot runner 创建无 preset 会话 → exit handler 捕获新 sessionId → `attachSession` 关联到配置的工作区 → 存入 config。之后每轮复用该 sessionId。若会话失效（stderr 含 "does not exist" / "does not compose"），自动清 sessionId，下次重新创建。值班轮与私信回复共用同一个 session。
 
 ### 爱好分析（本 fork 新增）
 | 参数 | 默认 | 说明 |
@@ -148,7 +149,7 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `autoComment` | `false` | 自动评论 @ 用户 |
 | `dmMode` | `'only'` | 私信投递：off / only / both |
 | `keywords` | `[]` | 搜索关键词（空 = 用章程默认；兴趣学习开启后会被覆盖） |
-| `workspace` | `''` | 值班轮工作目录（会话归该工作区） |
+
 | `headlessProfile` | `'dsh-cbw-bili'` | 值班轮 profile |
 | `runTimeoutMinutes` | `20` | 每轮最多跑多久（分钟） |
 | `modelProvider` | `''` | 值班轮模型 provider（空 = 跟随当前会话） |
