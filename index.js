@@ -2642,7 +2642,7 @@ function reportMeta() {
         if (newId) {
           log('值班会话已创建：' + newId.slice(0, 24) + '…（以后值班 + 私信都复用这个）')
           try { saveCfg({ sessionId: newId }) } catch { /* 存不了下次再创建 */ }
-          // ⭐ 把新 session 关联到工作区（否则侧栏显示在「未分组」）
+          // ⭐ 把新 session 关联到工作区 + 隐藏（防误点锁住值班轮）
           ;(async () => {
             try {
               const reg = ctx.get('workspaceRegistry')
@@ -2652,7 +2652,12 @@ function reportMeta() {
                 await ws.attachSession(newId)
                 log('已把值班会话归到工作区：' + (ws.title || ws.path || ''))
               }
-            } catch (e) { log('⚠️ 关联工作区失败：' + String(e?.message ?? e)) }
+              // ⭐ 归档（隐藏）：session 从侧栏消失但 workspace accounting 保留，one-shot runner 仍能读写
+              if (typeof reg.archiveSession === 'function') {
+                await reg.archiveSession(newId)
+                log('值班会话已归档隐藏：侧栏不显示，防误点锁住')
+              }
+            } catch (e) { log('⚠️ 关联/隐藏工作区失败：' + String(e?.message ?? e)) }
           })()
         } else {
           log('⚠️ 没找到新会话 ID ⇒ 下次还是新会话（不影响这一轮）')
