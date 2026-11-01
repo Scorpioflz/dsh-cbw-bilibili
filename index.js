@@ -2644,8 +2644,8 @@ function reportMeta() {
               const reg = ctx.get('workspaceRegistry')
               if (!reg) return
               const ws = await reg.resolveByPath(dutyCwd())
-              if (ws && typeof ws.insertSessionBefore === 'function') {
-                await ws.insertSessionBefore(newId)
+              if (ws && typeof ws.attachSession === 'function') {
+                await ws.attachSession(newId)
                 log('已把值班会话归到工作区：' + (ws.title || ws.path || ''))
               }
             } catch (e) { log('⚠️ 关联工作区失败：' + String(e?.message ?? e)) }

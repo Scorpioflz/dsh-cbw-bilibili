@@ -1,6 +1,6 @@
 {
   "name": "@dsh-cbw/bilibili",
-  "version": "2.3.8",
+  "version": "2.3.9",
   "description": "DSH Bilibili duty plugin — forked from dsh-bili-scroll with fixed-session, master profile, hobby analysis, interest learning",
   "keywords": [
     "dsh",
