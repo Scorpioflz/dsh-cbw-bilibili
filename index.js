@@ -2634,7 +2634,7 @@ function reportMeta() {
       }
       // ⭐ 没传 sid 且成功 ⇒ 捕获新 session ID 存 config，以后值班 + 私信都复用
       if (!sid && code === 0) {
-        const newId = discoverDutySession(startedAt)
+        const newId = discoverDmSession(startedAt)
         if (newId) {
           log('值班会话已创建：' + newId.slice(0, 24) + '…（以后值班 + 私信都复用这个）')
           try { saveCfg({ sessionId: newId }) } catch { /* 存不了下次再创建 */ }
