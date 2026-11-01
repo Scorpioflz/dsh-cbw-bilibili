@@ -1012,11 +1012,15 @@ function reportMeta() {
     const uploaderMap = {}
     for (const v of allVideos) {
       const name = String(v.author || '').trim()
-      if (name) uploaderMap[name] = (uploaderMap[name] || 0) + 1
+      if (name) {
+        if (!uploaderMap[name]) uploaderMap[name] = { count: 0, mid: Number(v.upper_mid) || 0 }
+        uploaderMap[name].count++
+        if (!uploaderMap[name].mid) uploaderMap[name].mid = Number(v.upper_mid) || 0
+      }
     }
     const topUploaders = Object.entries(uploaderMap)
-      .sort((a, b) => b[1] - a[1]).slice(0, 10)
-      .map(([name, count]) => ({ name, count, ratio: Math.round((count / total) * 100) / 100 }))
+      .sort((a, b) => b[1].count - a[1].count).slice(0, 10)
+      .map(([name, info]) => ({ name, count: info.count, mid: info.mid, ratio: Math.round((info.count / total) * 100) / 100 }))
 
     // 时间分布（按月）
     const monthMap = {}
@@ -1101,7 +1105,8 @@ function reportMeta() {
         batch.map((v) => call('bili_video_info', { bvid: v.bvid }).then((r) => ({ v, r })))
       )
       for (const res of results) {
-        if (res.status !== 'fulfilled' || !res.value?.r) continue
+        if (res.status !== 'fulfilled') { log(`深度采集 bili_video_info 失败: ${res.reason?.message || res.reason}`); continue }
+        if (!res.value?.r) continue
         const tw = timeWeight(res.value.v.fav_time, halfLifeDays)
         for (const tag of (res.value.r.tags || [])) {
           const t = String(tag).trim()
@@ -1116,7 +1121,7 @@ function reportMeta() {
   const deepCollectUploaderSigns = async (topUploaders, totalVideos, halfLifeDays) => {
     const top = topUploaders.slice(0, 10)
     const infos = await Promise.allSettled(
-      top.map((u) => call('bili_user_info', { uid: u.uid }).then((r) => ({ u, r })))
+      top.map((u) => call('bili_user_info', { uid: u.mid }).then((r) => ({ u, r })))
     )
     const signFreq = {}
     const stopChars = /[失效]/

@@ -1138,6 +1138,7 @@ async def bili_favorite_content(media_id: int, page: int = 1, keyword: str = "")
             "play": item.get("cnt_info", {}).get("play", 0),
             "collect": item.get("cnt_info", {}).get("collect", 0),
             "author": item.get("upper", {}).get("name", ""),
+            "upper_mid": item.get("upper", {}).get("mid", 0),
             "duration": item.get("duration", 0),
             "fav_time": item.get("fav_time", 0),
         })
