@@ -119,9 +119,9 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `webapiBase` | `''` | dsh-web-service 地址（P1 爱好分析工具用；空 = 自动探测 `127.0.0.1:3080`） |
 | `webapiKey` | `''` | API Key（空 = 本机免鉴权） |
 
-> **会话生命周期**：首次运行（`sessionId` 为空）→ one-shot runner 创建无 preset 会话 → exit handler 捕获新 sessionId → `attachSession` 关联到配置的工作区 → 存入 config。之后每轮复用该 sessionId。若会话失效（stderr 含 "does not exist" / "does not compose"），自动清 sessionId，下次重新创建。值班轮与私信回复共用同一个 session。
+> **会话生命周期**：首次运行（`sessionId` 为空）→ one-shot runner 创建无 preset 会话 → exit handler 捕获新 sessionId → `attachSession` 关联到配置的工作区 → `archiveSession` 归档隐藏 → 存入 config。之后每轮复用该 sessionId。若会话失效（stderr 含 "does not exist" / "does not compose"），自动清 sessionId，下次重新创建。值班轮与私信回复共用同一个 session。
 >
-> ⚠️ **不要在 DSH 侧栏打开这个会话窗口**：值班轮和私信回复都要写这个 session，你在侧栏一点开就持了 write handle，下一轮值班会报 `already owned by an active write handle` 直接不跑。要看内容，等它跑完、切到别的会话再快速看一眼就关掉。
+> ⚠️ **不要在 DSH 侧栏打开值班会话窗口**：值班轮和私信回复都要写这个 session，你在侧栏一点开就持了 write handle，下一轮值班会报 `already owned by an active write handle` 直接不跑。新建的会话会自动归档隐藏（侧栏不显示），但 F5 刷新后可能出现。**如果看到了，手动右键归档它即可**——归档不影响值班轮运行（session 仍能被 `--session-id` 正常读写，workspace accounting 保留），只从侧栏隐藏。这是安全的回退手段。
 
 ### 爱好分析（本 fork 新增）
 | 参数 | 默认 | 说明 |

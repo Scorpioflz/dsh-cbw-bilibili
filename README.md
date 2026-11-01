@@ -119,9 +119,9 @@ All settings are configurable via the DSH settings page or `~/.dsh/dsh-cbw-bilib
 | `webapiBase` | `''` | dsh-web-service base URL (for P1 hobby analysis API; empty = auto-detect `127.0.0.1:3080`) |
 | `webapiKey` | `''` | API Key (empty = local no-auth) |
 
-> **Session lifecycle**: first run (`sessionId` empty) → one-shot runner creates a no-preset session → exit handler captures the new sessionId → `attachSession` associates it with the configured workspace → stored in config. Subsequent rounds reuse that sessionId. If the session becomes invalid (stderr contains "does not exist" / "does not compose"), sessionId is auto-cleared and recreated next round. Duty rounds and DM replies share the same session.
+> **Session lifecycle**: first run (`sessionId` empty) → one-shot runner creates a no-preset session → exit handler captures the new sessionId → `attachSession` associates it with the configured workspace → `archiveSession` hides it from sidebar → stored in config. Subsequent rounds reuse that sessionId. If the session becomes invalid (stderr contains "does not exist" / "does not compose"), sessionId is auto-cleared and recreated next round. Duty rounds and DM replies share the same session.
 >
-> ⚠️ **Do NOT open this session in the DSH sidebar**: duty rounds and DM replies both write to this session. Opening it in the sidebar acquires a write handle, and the next duty round will fail with `already owned by an active write handle` and skip. To peek at the content, wait until the round finishes, switch to a different session, glance quickly, then close.
+> ⚠️ **Do NOT open the duty session in the DSH sidebar**: duty rounds and DM replies both write to this session. Opening it in the sidebar acquires a write handle, and the next duty round will fail with `already owned by an active write handle` and skip. New sessions are auto-archived (hidden from sidebar), but may reappear after F5 refresh. **If you see it, right-click → archive it** — archiving does not affect the duty round (the session is still readable/writable via `--session-id`, workspace accounting preserved), it only hides it from the sidebar. This is a safe fallback.
 
 ### Hobby analysis (new in this fork)
 | Parameter | Default | Description |
