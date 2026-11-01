@@ -120,6 +120,8 @@ dsh plugin --profile web add /path/to/dsh-cbw-bilibili
 | `webapiKey` | `''` | API Key（空 = 本机免鉴权） |
 
 > **会话生命周期**：首次运行（`sessionId` 为空）→ one-shot runner 创建无 preset 会话 → exit handler 捕获新 sessionId → `attachSession` 关联到配置的工作区 → 存入 config。之后每轮复用该 sessionId。若会话失效（stderr 含 "does not exist" / "does not compose"），自动清 sessionId，下次重新创建。值班轮与私信回复共用同一个 session。
+>
+> ⚠️ **不要在 DSH 侧栏打开这个会话窗口**：值班轮和私信回复都要写这个 session，你在侧栏一点开就持了 write handle，下一轮值班会报 `already owned by an active write handle` 直接不跑。要看内容，等它跑完、切到别的会话再快速看一眼就关掉。
 
 ### 爱好分析（本 fork 新增）
 | 参数 | 默认 | 说明 |

@@ -120,6 +120,8 @@ All settings are configurable via the DSH settings page or `~/.dsh/dsh-cbw-bilib
 | `webapiKey` | `''` | API Key (empty = local no-auth) |
 
 > **Session lifecycle**: first run (`sessionId` empty) → one-shot runner creates a no-preset session → exit handler captures the new sessionId → `attachSession` associates it with the configured workspace → stored in config. Subsequent rounds reuse that sessionId. If the session becomes invalid (stderr contains "does not exist" / "does not compose"), sessionId is auto-cleared and recreated next round. Duty rounds and DM replies share the same session.
+>
+> ⚠️ **Do NOT open this session in the DSH sidebar**: duty rounds and DM replies both write to this session. Opening it in the sidebar acquires a write handle, and the next duty round will fail with `already owned by an active write handle` and skip. To peek at the content, wait until the round finishes, switch to a different session, glance quickly, then close.
 
 ### Hobby analysis (new in this fork)
 | Parameter | Default | Description |
